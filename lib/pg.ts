@@ -22,9 +22,9 @@ export function ensureSchema(): Promise<void> {
         id text primary key, email text not null unique, name text not null default '', pass text not null,
         failed int not null default 0, locked_until timestamptz, created_at timestamptz not null default now())`;
       await q`alter table users add column if not exists sv int not null default 0`; // session version: raised on sign-out
-      // role: 'admin' runs the app (Google key), 'company' is a normal sign-up. The oldest account is the admin.
+      // role: 'admin' runs the app (Google key), 'company' is a normal sign-up. The admin is named explicitly (ADMIN_EMAIL), never inferred.
       await q`alter table users add column if not exists role text not null default 'company'`;
-      await q`update users set role = 'admin' where id = (select id from users order by created_at, id limit 1) and not exists (select 1 from users where role = 'admin')`;
+      await q`create unique index if not exists users_one_admin on users ((true)) where role = 'admin'`; // never more than one admin
       await q`create table if not exists app_settings (key text primary key, value text not null)`;
       await q`create table if not exists workspaces (
         user_id text primary key references users(id) on delete cascade, data jsonb not null, updated_at timestamptz not null default now())`;
