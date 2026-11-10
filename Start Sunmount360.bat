@@ -10,5 +10,5 @@ if not exist .next\BUILD_ID (
   call npx next build
 )
 start "" http://localhost:3600
-call npx next start -p 3600
+call npx next start -H 127.0.0.1 -p 3600
 pause

@@ -3,9 +3,9 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "dev": "next dev -p 3600",
+    "dev": "next dev -H 127.0.0.1 -p 3600",
     "build": "next build",
-    "start": "next start -p 3600"
+    "start": "next start -H 127.0.0.1 -p 3600"
   },
   "dependencies": {
     "leaflet": "^1.9.4",

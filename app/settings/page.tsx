@@ -23,9 +23,11 @@ export default function SettingsPage() {
   const [s, setS] = useState<Settings | null>(null);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
+  const [dropKey, setDropKey] = useState(false);
   useEffect(() => { api('/api/settings').then((r) => setS(r.settings)).catch((e) => setMsg({ ok: false, text: e.message })); }, []);
   if (!s) return <Shell>{msg ? <div className="error">{msg.text}</div> : <p className="muted">Loading…</p>}</Shell>;
 
+  const hasKey = !!(s as any).hasGoogleKey && !dropKey;
   const co = (k: string, v: string) => setS({ ...s, company: { ...s.company, [k]: v } });
   const logo = (file?: File) => {
     if (!file) return;
@@ -37,7 +39,7 @@ export default function SettingsPage() {
   const mod = (i: number, k: string, v: any) => setS({ ...s, customModules: s.customModules.map((m, j) => (j === i ? { ...m, [k]: v } : m)) });
   async function save() {
     setBusy(true); setMsg(null);
-    try { const r = await api('/api/settings', 'PUT', s); setS(r.settings); setMsg({ ok: true, text: 'Settings saved. Recalculate a design to apply changed loss values.' }); }
+    try { const r = await api('/api/settings', 'PUT', { ...s, removeGoogleKey: dropKey }); setS(r.settings); setDropKey(false); setMsg({ ok: true, text: 'Settings saved. Recalculate a design to apply changed loss values.' }); }
     catch (e: any) { setMsg({ ok: false, text: e.message }); }
     setBusy(false);
   }
@@ -62,11 +64,13 @@ export default function SettingsPage() {
 
       <div className="card"><div className="card-head">Sharper satellite imagery (optional)</div><div className="card-body" style={{ maxWidth: 760 }}>
         <div className="field" style={{ gridTemplateColumns: '160px 1fr' }}><label>Google Maps API key</label>
-          <input className="input" type="password" autoComplete="off" placeholder="Paste your own key here" value={s.googleMapsKey || ''} onChange={(e) => setS({ ...s, googleMapsKey: e.target.value })} />
+          <input className="input" type="password" autoComplete="off" placeholder={hasKey ? 'A key is saved. Paste a new one to replace it' : 'Paste your own key here'} value={s.googleMapsKey || ''} onChange={(e) => { setDropKey(false); setS({ ...s, googleMapsKey: e.target.value }); }} />
         </div>
         <p className="muted small">Without a key the app uses free Esri imagery, which is soft in many Indian towns (about 0.3 to 0.5 m per pixel). With your own Google key the editor loads Google satellite imagery at zoom 20, which shows shed edges, skylights and turbo vents clearly.</p>
         <p className="muted small">To get a key: open Google Cloud Console, create a project, turn on billing, enable <b>Map Tiles API</b>, then create an API key under Credentials. Google gives a monthly free allowance; opening one design loads about 100 tiles. The key is stored only in this computer&apos;s data folder.</p>
-        {s.googleMapsKey && <button className="btn sm" onClick={() => setS({ ...s, googleMapsKey: '' })}>Remove key</button>}
+        {hasKey && <p className="muted small">A key is saved on this computer. It is never shown again after saving.</p>}
+        {dropKey && <p className="muted small">The saved key will be removed when you press Save settings.</p>}
+        {hasKey && <button className="btn sm" onClick={() => { setDropKey(true); setS({ ...s, googleMapsKey: '' }); }}>Remove key</button>}
       </div></div>
 
       <div className="card"><div className="card-head">Solar modules<button className="btn sm" onClick={() => setS({ ...s, customModules: [...s.customModules, { id: 'c' + uid(), name: 'My module', watt: 590, length: 2.278, width: 1.134 }] })}>+ Add your own module</button></div>

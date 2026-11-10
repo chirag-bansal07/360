@@ -3,8 +3,11 @@ import { DEFAULT_LOSSES } from '@/lib/catalog';
 
 export const dynamic = 'force-dynamic';
 
+// The Google key is write-only: pages learn only whether one is saved.
+const masked = (s: any) => ({ ...s, googleMapsKey: '', hasGoogleKey: !!s.googleMapsKey });
+
 export async function GET() {
-  return json({ settings: readDb().settings });
+  return json({ settings: masked(readDb().settings) });
 }
 
 export async function PUT(req: Request) {
@@ -36,7 +39,8 @@ export async function PUT(req: Request) {
     if (out.inverterEff <= 50 || out.inverterEff > 100) return fail('Inverter efficiency must be between 50 and 100 %.');
     s.losses = out;
   }
-  if (typeof b.googleMapsKey === 'string') s.googleMapsKey = b.googleMapsKey.trim();
+  if (b.removeGoogleKey === true) s.googleMapsKey = '';
+  else if (typeof b.googleMapsKey === 'string' && b.googleMapsKey.trim()) s.googleMapsKey = b.googleMapsKey.trim();
   writeDb(db);
-  return json({ settings: s });
+  return json({ settings: masked(s) });
 }
