@@ -4,7 +4,7 @@
 // Reflection: ASHRAE incidence modifier. Cell temperature: NOCT model.
 import type { Design, LossRow, LossSettings, ModuleSpec, MonthRow, Results, Weather } from './types';
 import { findModule } from './catalog';
-import { blockSlots, blockYaw, designSignature, designTotals, rad, PANEL_THICK } from './geometry';
+import { shedRoofY, shedUnder, blockSlots, blockYaw, designSignature, designTotals, rad, PANEL_THICK } from './geometry';
 import { MID_DAY, MONTHS, MONTH_DAYS, sunVector, sunsetHourAngle } from './sun';
 
 const HOURS = 16; // solar hours 4.5 .. 19.5
@@ -71,7 +71,7 @@ export function simulate(lat: number, design: Design, mods: ModuleSpec[], weathe
   });
   for (const o of design.obstructions) {
     const yaw = -rad(o.rotation), cy = Math.cos(yaw), sy = Math.sin(yaw);
-    const box: Box = { c: [o.x, o.h / 2, o.z], u: [cy, 0, -sy], v: [sy, 0, cy], n: [0, 1, 0], hu: o.w / 2, hv: o.l / 2, hn: o.h / 2, r: Math.hypot(o.w, o.l, o.h) / 2 };
+    const box: Box = { c: [o.x, (shedUnder(design, o.x, o.z) ? shedRoofY(shedUnder(design, o.x, o.z)!, o.x, o.z) : 0) + o.h / 2, o.z], u: [cy, 0, -sy], v: [sy, 0, cy], n: [0, 1, 0], hu: o.w / 2, hv: o.l / 2, hn: o.h / 2, r: Math.hypot(o.w, o.l, o.h) / 2 };
     groups.push({ blockIndex: -1, flush: false, boxes: [box], c: box.c, r: box.r });
   }
 

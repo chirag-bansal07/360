@@ -8,7 +8,7 @@ import Confirm from '@/components/Confirm';
 import { useDesign } from '@/lib/useDesign';
 import { api, fmt, fmt0, SHORT_MONTHS } from '@/lib/client';
 import { findModule, newBlock, uid } from '@/lib/catalog';
-import { blockLayout, blockSlots, blockYaw, designTotals, edgeLengths, pointInPoly, polyArea, polyCentre, polyPerimeter, ROOF_CLEARANCE, shedAzimuth, shedRoofY, shedTopY, toWorld } from '@/lib/geometry';
+import { blockLayout, blockSlots, blockYaw, designTotals, edgeLengths, pointInPoly, polyArea, polyCentre, polyPerimeter, ROOF_CLEARANCE, shedAzimuth, shedRoofY, shedTopY, shedUnder, toWorld } from '@/lib/geometry';
 import { clockToSolar, dayOfYear, sunVector } from '@/lib/sun';
 import type { Block, Design, Keepout, ModuleSpec, Obstruction, Pt, Shed, Walkway } from '@/lib/types';
 import type { DrawKind, Selection, Tool } from '@/lib/engine';
@@ -161,7 +161,12 @@ export default function Editor() {
   };
   const addWalkway = () => {
     const d = latest.current!; const c = centre();
-    const w: Walkway = { id: uid(), name: `Walkway ${d.walkways.length + 1}`, x: r2(c.x), z: r2(c.z), w: 0.5, l: 10, h: 1, rotation: 90 };
+    // with a shed (or one of its panel sets) selected, the walkway starts on that roof, running along its long side
+    const sid = sel?.kind === 'shed' ? sel.id : sel?.kind === 'block' ? d.blocks.find((b) => b.id === sel.id)?.shedId : d.sheds.length === 1 ? d.sheds[0].id : '';
+    const on = d.sheds.find((q) => q.id === sid) || shedUnder(d, c.x, c.z);
+    const at = on ? polyCentre(on.points) : [c.x, c.z];
+    const w: Walkway = { id: uid(), name: `Walkway ${d.walkways.length + 1}`, x: r2(at[0]), z: r2(at[1]), w: 0.5, l: 10, h: 1, rotation: on ? (shedAzimuth(on) + 90) % 180 : 90 };
+    if (on) setNotice(`Walkway placed on the roof of ${on.name}. Drag it into place; it follows the roof tilt.`);
     apply({ ...d, walkways: [...d.walkways, w] }); setSel({ kind: 'walkway', id: w.id }); setTool('select');
   };
   const canDuplicate = !!sel && (sel.kind === 'obstruction' || sel.kind === 'walkway' || sel.kind === 'block');
@@ -351,7 +356,7 @@ export default function Editor() {
         {keep && <KeepoutPanel k={keep} patch={(p) => patchKeepout(keep.id, p)} onDelete={() => setConfirmDel(true)} />}
         {block && <BlockPanel b={block} design={design} mods={mods} patch={(p) => patchBlock(block.id, p)} onDuplicate={duplicate} onDelete={() => setConfirmDel(true)}
           onPanelsTool={() => { setTool('panels'); setSel(null); }} onShed={() => block.shedId && setSel({ kind: 'shed', id: block.shedId })} />}
-        {(obst || walk) && <BoxPanel o={(obst || walk)!} walkway={!!walk} patch={(p) => patchObj(obst ? 'obstructions' : 'walkways', (obst || walk)!.id, p)} onDuplicate={duplicate} onDelete={() => setConfirmDel(true)} />}
+        {(obst || walk) && <BoxPanel o={(obst || walk)!} walkway={!!walk} roof={shedUnder(design, (obst || walk)!.x, (obst || walk)!.z)?.name || ''} patch={(p) => patchObj(obst ? 'obstructions' : 'walkways', (obst || walk)!.id, p)} onDuplicate={duplicate} onDelete={() => setConfirmDel(true)} />}
         {!picked && (
           <>
             <h3>Design summary</h3>
@@ -575,14 +580,17 @@ function BlockPanel({ b, design, mods, patch, onDuplicate, onDelete, onPanelsToo
   );
 }
 
-function BoxPanel({ o, walkway, patch, onDuplicate, onDelete }: { o: Obstruction | Walkway; walkway: boolean; patch: (p: any) => void; onDuplicate: () => void; onDelete: () => void }) {
+function BoxPanel({ o, walkway, roof, patch, onDuplicate, onDelete }: { o: Obstruction | Walkway; walkway: boolean; roof: string; patch: (p: any) => void; onDuplicate: () => void; onDelete: () => void }) {
   return (
     <>
       <Head name={o.name} onName={(name) => patch({ name })} onDuplicate={onDuplicate} onDelete={onDelete} />
       <div className="ed-sec"><div className="t">{walkway ? 'Walkway size' : 'Obstruction size'}</div>
         <div className="ef"><label>Width</label><Num value={o.w} min={0.1} max={500} step={0.1} unit="m" onCommit={(v) => patch({ w: v })} /></div>
         <div className="ef"><label>Length</label><Num value={o.l} min={0.1} max={1000} step={0.1} unit="m" onCommit={(v) => patch({ l: v })} /></div>
-        <div className="ef"><label>{walkway ? 'Height above ground' : 'Height'}<small>{walkway ? 'set it to the roof level' : 'casts a shadow on the panels'}</small></label><Num value={o.h} min={0} max={150} step={0.1} unit="m" onCommit={(v) => patch({ h: v })} /></div>
+        {walkway && roof
+          ? <div className="kv"><span>Height</span><b>on the roof of {roof}</b></div>
+          : <div className="ef"><label>{walkway ? 'Height above ground' : 'Height'}<small>{walkway ? 'used on open ground' : roof ? `above the roof of ${roof}` : 'casts a shadow on the panels'}</small></label><Num value={o.h} min={0} max={150} step={0.1} unit="m" onCommit={(v) => patch({ h: v })} /></div>}
+        {walkway && roof && <div style={{ color: 'var(--ed-muted)', fontSize: 12 }}>The walkway lies on the roof and follows its tilt. Drag it off the shed to place it on the ground.</div>}
         <div className="ef"><label>Rotation<small>0° = length runs north–south</small></label><Num value={o.rotation} min={0} max={360} step={1} unit="°" onCommit={(v) => patch({ rotation: v % 360 })} /></div>
       </div>
       <div className="ed-sec"><div className="t">Position from the project pin</div>

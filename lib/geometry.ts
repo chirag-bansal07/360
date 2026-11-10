@@ -116,6 +116,18 @@ export function shedRoofY(shed: Shed, x: number, z: number): number {
   for (const [px, pz] of shed.points) min = Math.min(min, px * ux + pz * uz);
   return shed.height + Math.tan(t) * (x * ux + z * uz - min);
 }
+// The shed whose roof is under a point (the highest one if outlines overlap), or null on open ground.
+export function shedUnder(d: { sheds?: Shed[] }, x: number, z: number): Shed | null {
+  let best: Shed | null = null;
+  for (const s of d.sheds || []) if (s.points.length >= 3 && pointInPoly(x, z, s.points) && (!best || shedRoofY(s, x, z) > shedRoofY(best, x, z))) best = s;
+  return best;
+}
+// Unit vector at right angles to the roof surface, pointing up.
+export function shedNormal(shed: Shed): [number, number, number] {
+  const t = Math.tan(rad(Math.max(0, Math.min(60, shed.tilt || 0))));
+  const a = rad(shed.slopeAz ?? 180), gx = -Math.sin(a) * t, gz = Math.cos(a) * t, len = Math.hypot(gx, 1, gz);
+  return [-gx / len, 1 / len, -gz / len];
+}
 export const shedTopY = (shed: Shed) => shed.points.reduce((h, [x, z]) => Math.max(h, shedRoofY(shed, x, z)), shed.height);
 
 // Rows, columns and centre that fill the shed (inside its edge margin) for the block's current settings.

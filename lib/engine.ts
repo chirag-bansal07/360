@@ -4,7 +4,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import type { Design, ModuleSpec, Pt, Results } from './types';
 import { findModule } from './catalog';
-import { shedRoofY, blockSlots, blockYaw, designBounds, polyCentre, pointInPoly, rad, PANEL_THICK } from './geometry';
+import { shedRoofY, shedUnder, shedNormal, blockSlots, blockYaw, designBounds, polyCentre, pointInPoly, rad, PANEL_THICK } from './geometry';
 import { tileXY, metresPerPixel } from './mercator';
 
 export type Selection = { kind: 'block' | 'obstruction' | 'walkway' | 'shed' | 'keepout'; id: string } | null;
@@ -369,8 +369,18 @@ export class Engine {
     const box = (o: { id: string; x: number; z: number; w: number; l: number; h: number; rotation: number }, kind: 'obstruction' | 'walkway') => {
       const isWalk = kind === 'walkway';
       const mesh = new THREE.Mesh(new THREE.BoxGeometry(o.w, isWalk ? 0.06 : o.h, o.l), new THREE.MeshLambertMaterial({ color: isWalk ? '#e3d9a8' : '#a7b0b9' }));
-      mesh.position.set(o.x, isWalk ? o.h + 0.03 : o.h / 2, o.z);
-      mesh.rotation.y = -rad(o.rotation);
+      // On a shed these sit on the roof: a walkway lies on the roof surface and follows its tilt, an obstruction stands on it.
+      const roof = shedUnder(d, o.x, o.z);
+      const base = roof ? shedRoofY(roof, o.x, o.z) : 0;
+      const up = new THREE.Vector3(0, 1, 0);
+      const turn = new THREE.Quaternion().setFromAxisAngle(up, -rad(o.rotation));
+      if (roof && isWalk) {
+        mesh.position.set(o.x, base + 0.2, o.z); // just above the panels
+        mesh.quaternion.copy(new THREE.Quaternion().setFromUnitVectors(up, new THREE.Vector3(...shedNormal(roof))).multiply(turn));
+      } else {
+        mesh.position.set(o.x, roof ? base + o.h / 2 : isWalk ? o.h + 0.03 : o.h / 2, o.z);
+        mesh.quaternion.copy(turn);
+      }
       mesh.castShadow = !isWalk; mesh.receiveShadow = true;
       mesh.userData.sel = { kind, id: o.id };
       const hw = o.w / 2 + 0.1, hl = o.l / 2 + 0.1, y = (isWalk ? 0.03 : o.h / 2) + 0.08;
