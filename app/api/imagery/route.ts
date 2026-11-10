@@ -8,7 +8,7 @@ export const dynamic = 'force-dynamic';
 export async function GET(req: Request) {
   const u = new URL(req.url);
   const lat = Number(u.searchParams.get('lat')), lng = Number(u.searchParams.get('lng'));
-  const key = readDb().settings.googleMapsKey;
+  const key = (await readDb()).settings.googleMapsKey;
   let warning = '';
   if (key) {
     try {

@@ -7,12 +7,12 @@ export const dynamic = 'force-dynamic';
 const masked = (s: any) => ({ ...s, googleMapsKey: '', hasGoogleKey: !!s.googleMapsKey });
 
 export async function GET() {
-  return json({ settings: masked(readDb().settings) });
+  return json({ settings: masked((await readDb()).settings) });
 }
 
 export async function PUT(req: Request) {
   const b = await req.json();
-  const db = readDb();
+  const db = (await readDb());
   const s = db.settings;
   if (b.company) {
     const logo = String(b.company.logo || '');
@@ -41,6 +41,6 @@ export async function PUT(req: Request) {
   }
   if (b.removeGoogleKey === true) s.googleMapsKey = '';
   else if (typeof b.googleMapsKey === 'string' && b.googleMapsKey.trim()) s.googleMapsKey = b.googleMapsKey.trim();
-  writeDb(db);
+  await writeDb(db);
   return json({ settings: masked(s) });
 }

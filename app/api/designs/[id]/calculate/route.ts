@@ -23,7 +23,7 @@ async function fetchWeather(lat: number, lng: number): Promise<Weather> {
 
 export async function POST(_req: Request, ctx: { params: Promise<{ id: string }> }) {
   const { id } = await ctx.params;
-  const db = readDb();
+  const db = (await readDb());
   const hit = findDesign(db, id);
   if (!hit) return fail('Design not found.', 404);
   const { project, design } = hit;
@@ -38,11 +38,11 @@ export async function POST(_req: Request, ctx: { params: Promise<{ id: string }>
   }
   const results = { ...simulate(project.lat, design, mods, project.weather, db.settings.losses), calculatedAt: new Date().toISOString() };
   // the design may have been saved again while weather was downloading
-  const fresh = readDb();
+  const fresh = (await readDb());
   const again = findDesign(fresh, id);
   if (!again) return fail('Design not found.', 404);
   again.project.weather = project.weather;
   again.design.results = results;
-  writeDb(fresh);
+  await writeDb(fresh);
   return json({ results });
 }

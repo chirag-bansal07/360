@@ -6,7 +6,7 @@ export const dynamic = 'force-dynamic';
 export async function POST(req: Request, ctx: { params: Promise<{ id: string }> }) {
   const { id } = await ctx.params;
   const b = await req.json().catch(() => ({}));
-  const db = readDb();
+  const db = (await readDb());
   const project = db.projects.find((p) => p.id === id);
   if (!project) return fail('Project not found.', 404);
   const name = String(b.name || '').trim() || `Design ${project.designs.length + 1}`;
@@ -18,6 +18,6 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
     design = { ...JSON.parse(JSON.stringify(src)), id: uid(), name: String(b.name || '').trim() || `${src.name} (copy)`, createdAt: now, updatedAt: now };
   }
   project.designs.push(design);
-  writeDb(db);
+  await writeDb(db);
   return json({ design });
 }

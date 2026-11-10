@@ -1,28 +1,53 @@
-// Server-side storage: one JSON file in /data.
+// Server-side storage.
+//  - On this computer: one JSON file in /data, no login.
+//  - Hosted on Vercel: one workspace per signed-in user in the Postgres database.
 import fs from 'fs';
 import path from 'path';
 import type { Db, Design, Project } from './types';
 import { DEFAULT_SETTINGS } from './catalog';
+import { HOSTED } from './session';
+import { requireUserId } from './auth';
+import { ensureSchema, sql } from './pg';
 
 const DIR = path.join(process.cwd(), 'data');
 const FILE = path.join(DIR, 'db.json');
+const empty = (): Db => ({ nextNumber: 1001, projects: [], settings: DEFAULT_SETTINGS });
 
-export function readDb(): Db {
+function normalise(db: Db): Db {
+  db.projects = db.projects || [];
+  db.nextNumber = db.nextNumber || 1001;
+  db.settings = {
+    ...DEFAULT_SETTINGS, ...db.settings,
+    company: { ...DEFAULT_SETTINGS.company, ...db.settings?.company },
+    losses: { ...DEFAULT_SETTINGS.losses, ...db.settings?.losses },
+  };
+  for (const pr of db.projects) for (const d of pr.designs) { d.sheds = d.sheds || []; d.keepouts = d.keepouts || []; }
+  return db;
+}
+
+export async function readDb(): Promise<Db> {
+  if (HOSTED) {
+    const userId = await requireUserId();
+    await ensureSchema();
+    const rows = (await sql()`select data from workspaces where user_id = ${userId}`) as any[];
+    return rows.length ? normalise(rows[0].data as Db) : empty();
+  }
   try {
-    const db = JSON.parse(fs.readFileSync(FILE, 'utf8')) as Db;
-    db.settings = {
-      ...DEFAULT_SETTINGS, ...db.settings,
-      company: { ...DEFAULT_SETTINGS.company, ...db.settings?.company },
-      losses: { ...DEFAULT_SETTINGS.losses, ...db.settings?.losses },
-    };
-    for (const pr of db.projects) for (const d of pr.designs) { d.sheds = d.sheds || []; d.keepouts = d.keepouts || []; }
-    return db;
+    return normalise(JSON.parse(fs.readFileSync(FILE, 'utf8')) as Db);
   } catch {
-    return { nextNumber: 1001, projects: [], settings: DEFAULT_SETTINGS };
+    return empty();
   }
 }
 
-export function writeDb(db: Db) {
+export async function writeDb(db: Db): Promise<void> {
+  if (HOSTED) {
+    const userId = await requireUserId();
+    await ensureSchema();
+    const data = JSON.stringify(db);
+    await sql()`insert into workspaces (user_id, data) values (${userId}, ${data}::jsonb)
+      on conflict (user_id) do update set data = excluded.data, updated_at = now()`;
+    return;
+  }
   fs.mkdirSync(DIR, { recursive: true });
   const tmp = FILE + '.tmp';
   fs.writeFileSync(tmp, JSON.stringify(db));

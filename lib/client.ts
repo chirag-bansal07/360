@@ -4,9 +4,10 @@ export async function api<T = any>(url: string, method = 'GET', body?: any): Pro
   try {
     res = await fetch(url, { method, headers: body ? { 'Content-Type': 'application/json' } : undefined, body: body ? JSON.stringify(body) : undefined });
   } catch {
-    throw new Error('Cannot reach the Sunmount360 server. Check that the app is still running.');
+    throw new Error('Cannot reach the Sunmount360 server. Check your connection, or that the app is still running.');
   }
   const data = await res.json().catch(() => ({}));
+  if (res.status === 401 && typeof window !== 'undefined') { window.location.href = '/login'; throw new Error('Please sign in again.'); }
   if (!res.ok) throw new Error(data?.error || `Something went wrong (${res.status}).`);
   return data as T;
 }

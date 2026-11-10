@@ -5,7 +5,7 @@ type Ctx = { params: Promise<{ id: string }> };
 
 export async function GET(_req: Request, ctx: Ctx) {
   const { id } = await ctx.params;
-  const db = readDb();
+  const db = (await readDb());
   const hit = findDesign(db, id);
   if (!hit) return fail('Design not found.', 404);
   const { designs, ...project } = hit.project;
@@ -16,7 +16,7 @@ export async function GET(_req: Request, ctx: Ctx) {
 export async function PUT(req: Request, ctx: Ctx) {
   const { id } = await ctx.params;
   const b = await req.json();
-  const db = readDb();
+  const db = (await readDb());
   const hit = findDesign(db, id);
   if (!hit) return fail('Design not found.', 404);
   const d = hit.design;
@@ -31,16 +31,16 @@ export async function PUT(req: Request, ctx: Ctx) {
   if (typeof b.structureName === 'string') d.structureName = b.structureName;
   if (typeof b.thumb === 'string') d.thumb = b.thumb;
   d.updatedAt = new Date().toISOString();
-  writeDb(db);
+  await writeDb(db);
   return json({ ok: true, updatedAt: d.updatedAt });
 }
 
 export async function DELETE(_req: Request, ctx: Ctx) {
   const { id } = await ctx.params;
-  const db = readDb();
+  const db = (await readDb());
   const hit = findDesign(db, id);
   if (!hit) return fail('Design not found.', 404);
   hit.project.designs.splice(hit.index, 1);
-  writeDb(db);
+  await writeDb(db);
   return json({ ok: true, projectId: hit.project.id });
 }
