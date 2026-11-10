@@ -374,11 +374,13 @@ export class Engine {
       const base = roof ? shedRoofY(roof, o.x, o.z) : 0;
       const up = new THREE.Vector3(0, 1, 0);
       const turn = new THREE.Quaternion().setFromAxisAngle(up, -rad(o.rotation));
-      if (roof && isWalk) {
-        mesh.position.set(o.x, base + 0.2, o.z); // just above the panels
-        mesh.quaternion.copy(new THREE.Quaternion().setFromUnitVectors(up, new THREE.Vector3(...shedNormal(roof))).multiply(turn));
+      if (roof) {
+        const n = new THREE.Vector3(...shedNormal(roof));
+        const lift = isWalk ? 0.2 : o.h / 2; // a walkway lies just above the panels, an obstruction stands on the roof
+        mesh.position.set(o.x, base, o.z).addScaledVector(n, lift);
+        mesh.quaternion.copy(new THREE.Quaternion().setFromUnitVectors(up, n).multiply(turn));
       } else {
-        mesh.position.set(o.x, roof ? base + o.h / 2 : isWalk ? o.h + 0.03 : o.h / 2, o.z);
+        mesh.position.set(o.x, isWalk ? o.h + 0.03 : o.h / 2, o.z);
         mesh.quaternion.copy(turn);
       }
       mesh.castShadow = !isWalk; mesh.receiveShadow = true;

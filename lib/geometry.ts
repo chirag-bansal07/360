@@ -128,6 +128,16 @@ export function shedNormal(shed: Shed): [number, number, number] {
   const a = rad(shed.slopeAz ?? 180), gx = -Math.sin(a) * t, gz = Math.cos(a) * t, len = Math.hypot(gx, 1, gz);
   return [-gx / len, 1 / len, -gz / len];
 }
+// Turns a vector the same way the roof is tipped away from level (the rotation that takes "straight up" to the roof normal).
+export function tipToRoof(shed: Shed, a: [number, number, number]): [number, number, number] {
+  const n = shedNormal(shed);
+  const kx = n[2], kz = -n[0], s = Math.hypot(kx, kz); // axis = up x normal
+  if (s < 1e-9) return a;
+  const ux = kx / s, uz = kz / s, c = n[1];
+  const dot = ux * a[0] + uz * a[2];
+  const cx = -uz * a[1], cy = uz * a[0] - ux * a[2], cz = ux * a[1]; // axis x a
+  return [a[0] * c + cx * s + ux * dot * (1 - c), a[1] * c + cy * s, a[2] * c + cz * s + uz * dot * (1 - c)];
+}
 export const shedTopY = (shed: Shed) => shed.points.reduce((h, [x, z]) => Math.max(h, shedRoofY(shed, x, z)), shed.height);
 
 // Rows, columns and centre that fill the shed (inside its edge margin) for the block's current settings.

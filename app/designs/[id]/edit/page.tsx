@@ -156,7 +156,12 @@ export default function Editor() {
 
   const addObstruction = () => {
     const d = latest.current!; const c = centre();
-    const o: Obstruction = { id: uid(), name: `Obstruction ${d.obstructions.length + 1}`, x: r2(c.x), z: r2(c.z), w: 2, l: 2, h: 2, rotation: 0 };
+    // with a shed (or one of its panel sets) selected, the obstruction starts on that roof
+    const sid = sel?.kind === 'shed' ? sel.id : sel?.kind === 'block' ? d.blocks.find((b) => b.id === sel.id)?.shedId : d.sheds.length === 1 ? d.sheds[0].id : '';
+    const on = d.sheds.find((q) => q.id === sid) || shedUnder(d, c.x, c.z);
+    const at = on ? polyCentre(on.points) : [c.x, c.z];
+    const o: Obstruction = { id: uid(), name: `Obstruction ${d.obstructions.length + 1}`, x: r2(at[0]), z: r2(at[1]), w: 2, l: 2, h: on ? 1 : 2, rotation: on ? (shedAzimuth(on) + 90) % 180 : 0 };
+    if (on) setNotice(`Obstruction placed on the roof of ${on.name}. Drag it into place; it stands on the roof and follows its tilt.`);
     apply({ ...d, obstructions: [...d.obstructions, o] }); setSel({ kind: 'obstruction', id: o.id }); setTool('select');
   };
   const addWalkway = () => {
@@ -589,7 +594,7 @@ function BoxPanel({ o, walkway, roof, patch, onDuplicate, onDelete }: { o: Obstr
         <div className="ef"><label>Length</label><Num value={o.l} min={0.1} max={1000} step={0.1} unit="m" onCommit={(v) => patch({ l: v })} /></div>
         {walkway && roof
           ? <div className="kv"><span>Height</span><b>on the roof of {roof}</b></div>
-          : <div className="ef"><label>{walkway ? 'Height above ground' : 'Height'}<small>{walkway ? 'used on open ground' : roof ? `above the roof of ${roof}` : 'casts a shadow on the panels'}</small></label><Num value={o.h} min={0} max={150} step={0.1} unit="m" onCommit={(v) => patch({ h: v })} /></div>}
+          : <div className="ef"><label>{walkway ? 'Height above ground' : 'Height'}<small>{walkway ? 'used on open ground' : roof ? `above the roof of ${roof}, follows its tilt` : 'casts a shadow on the panels'}</small></label><Num value={o.h} min={0} max={150} step={0.1} unit="m" onCommit={(v) => patch({ h: v })} /></div>}
         {walkway && roof && <div style={{ color: 'var(--ed-muted)', fontSize: 12 }}>The walkway lies on the roof and follows its tilt. Drag it off the shed to place it on the ground.</div>}
         <div className="ef"><label>Rotation<small>0° = length runs north–south</small></label><Num value={o.rotation} min={0} max={360} step={1} unit="°" onCommit={(v) => patch({ rotation: v % 360 })} /></div>
       </div>
