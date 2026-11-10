@@ -64,15 +64,8 @@ export async function createUser(email: string, name: string, password: string):
   await ensureSchema();
   const id = 'u' + uid() + uid();
   const pass = await hashPassword(password);
-  // Sign-ups are company logins. The admin is the account whose email is set in ADMIN_EMAIL, and only while no admin exists.
-  const wantAdmin = !!process.env.ADMIN_EMAIL && email === process.env.ADMIN_EMAIL.trim().toLowerCase();
-  const q = sql();
-  let rows: any[] = [];
-  if (wantAdmin) {
-    try { rows = (await q`insert into users (id, email, name, pass, role) values (${id}, ${email}, ${name}, ${pass}, 'admin') on conflict (email) do nothing returning id`) as any[]; return rows.length ? id : null; }
-    catch { /* an admin already exists: fall through to a company login */ }
-  }
-  rows = (await q`insert into users (id, email, name, pass, role) values (${id}, ${email}, ${name}, ${pass}, 'company') on conflict (email) do nothing returning id`) as any[];
+  // Every sign-up is a company login. The admin role is never granted here; it is only set directly in the database.
+  const rows = (await sql()`insert into users (id, email, name, pass, role) values (${id}, ${email}, ${name}, ${pass}, 'company') on conflict (email) do nothing returning id`) as any[];
   return rows.length ? id : null;
 }
 

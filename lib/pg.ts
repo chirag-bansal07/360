@@ -22,7 +22,7 @@ export function ensureSchema(): Promise<void> {
         id text primary key, email text not null unique, name text not null default '', pass text not null,
         failed int not null default 0, locked_until timestamptz, created_at timestamptz not null default now())`;
       await q`alter table users add column if not exists sv int not null default 0`; // session version: raised on sign-out
-      // role: 'admin' runs the app (Google key), 'company' is a normal sign-up. The admin is named explicitly (ADMIN_EMAIL), never inferred.
+      // role: 'admin' runs the app (Google key), 'company' is a normal sign-up. The admin is set directly in the database, never through sign-up.
       await q`alter table users add column if not exists role text not null default 'company'`;
       await q`create unique index if not exists users_one_admin on users ((true)) where role = 'admin'`; // never more than one admin
       await q`create table if not exists app_settings (key text primary key, value text not null)`;
