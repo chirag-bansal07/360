@@ -6,7 +6,7 @@ import type { ColorMode, DrawKind, Engine, EngineEvents, Selection, Tool } from 
 type Props = {
   lat: number; lng: number; interactive: boolean;
   design: Design; mods: ModuleSpec[]; results: Results | null;
-  view: '2d' | '3d'; tool: Tool; selected?: Selection;
+  view: '2d' | '3d'; tool: Tool; selected?: Selection; also?: NonNullable<Selection>[];
   sun?: [number, number, number] | null; colorMode?: ColorMode;
   events?: EngineEvents; overlay?: boolean; draw?: DrawKind | null;
 };
@@ -29,7 +29,7 @@ const SceneView = forwardRef<SceneHandle, Props>(function SceneView(p, ref) {
       if (dead || !host.current) return;
       try {
         const e = new Engine(host.current, { lat: p.lat, lng: p.lng, interactive: p.interactive }, {
-          onSelect: (s) => events.current.onSelect?.(s),
+          onSelect: (s, add) => events.current.onSelect?.(s, add),
           onMove: (s, x, z) => events.current.onMove?.(s, x, z),
           onTogglePanel: (b, k, a) => events.current.onTogglePanel?.(b, k, a),
           onHover: (h) => setHover(h),
@@ -41,7 +41,7 @@ const SceneView = forwardRef<SceneHandle, Props>(function SceneView(p, ref) {
         });
         eng.current = e;
         e.setData(p.design, p.mods, p.results);
-        e.setView(p.view); e.setTool(p.tool); e.setSelected(p.selected || null);
+        e.setView(p.view); e.setTool(p.tool); e.setSelected(p.selected || null); e.setAlso(p.also || []);
         e.setColorMode(p.colorMode || 'normal'); e.setSun(p.sun || null);
         e.fit();
       } catch {
@@ -56,6 +56,7 @@ const SceneView = forwardRef<SceneHandle, Props>(function SceneView(p, ref) {
   useEffect(() => { eng.current?.setView(p.view); }, [p.view]);
   useEffect(() => { eng.current?.setTool(p.tool); if (p.tool !== 'panels') setHover(null); }, [p.tool]);
   useEffect(() => { eng.current?.setSelected(p.selected || null); }, [p.selected]);
+  useEffect(() => { eng.current?.setAlso(p.also || []); }, [p.also]);
   useEffect(() => { eng.current?.setColorMode(p.colorMode || 'normal'); }, [p.colorMode]);
   useEffect(() => { eng.current?.setSun(p.sun || null); }, [p.sun]);
   useEffect(() => { if (p.draw) eng.current?.startDraw(p.draw); else eng.current?.cancelDraw(); }, [p.draw]);

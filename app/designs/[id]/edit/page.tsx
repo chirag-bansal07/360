@@ -8,7 +8,7 @@ import Confirm from '@/components/Confirm';
 import { useDesign } from '@/lib/useDesign';
 import { api, fmt, fmt0, SHORT_MONTHS } from '@/lib/client';
 import { findModule, newBlock, uid } from '@/lib/catalog';
-import { blockLayout, blockSlots, blockYaw, designTotals, edgeLengths, pointInPoly, polyArea, polyCentre, polyPerimeter, ROOF_CLEARANCE, shedAzimuth, shedRoofY, shedTopY, shedUnder, toWorld } from '@/lib/geometry';
+import { blockLayout, blockSlots, blockYaw, designTotals, edgeLengths, pointInPoly, polyArea, polyCentre, polyPerimeter, ROOF_CLEARANCE, rad, shedAzimuth, shedRoofY, shedTopY, shedUnder, toWorld } from '@/lib/geometry';
 import { clockToSolar, dayOfYear, sunVector } from '@/lib/sun';
 import type { Block, Design, Keepout, ModuleSpec, Obstruction, Pt, Shed, Walkway } from '@/lib/types';
 import type { DrawKind, Selection, Tool } from '@/lib/engine';
@@ -16,6 +16,65 @@ import type { DrawKind, Selection, Tool } from '@/lib/engine';
 const I = ({ d }: { d: string }) => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d={d} /></svg>;
 const clockLabel = (h: number) => { const hh = Math.floor(h), mm = Math.round((h - hh) * 60); return `${((hh + 11) % 12) + 1}:${String(mm).padStart(2, '0')} ${hh < 12 ? 'AM' : 'PM'}`; };
 const r2 = (n: number) => Math.round(n * 100) / 100;
+const r3 = (n: number) => Math.round(n * 1000) / 1000;
+type Pick = NonNullable<Selection>;
+const MOVABLE = ['block', 'obstruction', 'walkway'];
+const NO_PICKS: Pick[] = [];
+type ArrangeOp = 'top' | 'bottom' | 'left' | 'right' | 'row' | 'column';
+
+// Footprint of a panel set, obstruction or walkway on the plan: centre, turn and half sizes.
+function footprint(d: Design, mods: ModuleSpec[], p: Pick): { p: Pick; name: string; x: number; z: number; yaw: number; hw: number; hd: number } | null {
+  if (p.kind === 'block') {
+    const b = d.blocks.find((q) => q.id === p.id); if (!b) return null;
+    const L = blockLayout(b, findModule(mods, b.moduleId));
+    return { p, name: b.name, x: b.x, z: b.z, yaw: blockYaw(b.azimuth), hw: L.width / 2, hd: L.depth / 2 };
+  }
+  const o = (p.kind === 'obstruction' ? d.obstructions : p.kind === 'walkway' ? d.walkways : []).find((q) => q.id === p.id);
+  return o ? { p, name: o.name, x: o.x, z: o.z, yaw: -rad(o.rotation), hw: o.w / 2, hd: o.l / 2 } : null;
+}
+
+// Lines up or spaces the picked items. Directions are those of the first picked item:
+// "across" runs along its rows (left to right), "top to bottom" runs from its back edge to its front edge.
+function arrange(d: Design, mods: ModuleSpec[], picks: Pick[], op: ArrangeOp, gap: number): { design?: Design; error?: string } {
+  const items = picks.map((p) => footprint(d, mods, p)).filter(Boolean) as NonNullable<ReturnType<typeof footprint>>[];
+  if (items.length < 2) return { error: 'Select at least two items first (Ctrl + click).' };
+  const c = Math.cos(items[0].yaw), s = Math.sin(items[0].yaw);
+  const U: Pt = [c, -s], V: Pt = [s, c];
+  const ext = items.map((it) => {
+    let u0 = Infinity, u1 = -Infinity, v0 = Infinity, v1 = -Infinity;
+    for (const [lx, lz] of [[-it.hw, -it.hd], [it.hw, -it.hd], [it.hw, it.hd], [-it.hw, it.hd]]) {
+      const [wx, wz] = toWorld(it.x, it.z, it.yaw, lx, lz);
+      const u = wx * U[0] + wz * U[1], v = wx * V[0] + wz * V[1];
+      u0 = Math.min(u0, u); u1 = Math.max(u1, u); v0 = Math.min(v0, v); v1 = Math.max(v1, v);
+    }
+    return { u0, u1, v0, v1 };
+  });
+  const du = items.map(() => 0), dv = items.map(() => 0);
+  if (op === 'top') items.forEach((_, i) => { dv[i] = ext[0].v0 - ext[i].v0; });
+  else if (op === 'bottom') items.forEach((_, i) => { dv[i] = ext[0].v1 - ext[i].v1; });
+  else if (op === 'left') items.forEach((_, i) => { du[i] = ext[0].u0 - ext[i].u0; });
+  else if (op === 'right') items.forEach((_, i) => { du[i] = ext[0].u1 - ext[i].u1; });
+  else {
+    // keep the order they are in now; the first in that order stays where it is
+    const row = op === 'row';
+    const order = items.map((_, i) => i).sort((a, b) => (row ? ext[a].u0 + ext[a].u1 - ext[b].u0 - ext[b].u1 : ext[a].v0 + ext[a].v1 - ext[b].v0 - ext[b].v1));
+    let edge = row ? ext[order[0]].u1 : ext[order[0]].v1;
+    for (const i of order.slice(1)) {
+      const move = edge + gap - (row ? ext[i].u0 : ext[i].v0);
+      if (row) du[i] = move; else dv[i] = move;
+      edge = (row ? ext[i].u1 : ext[i].v1) + move;
+    }
+  }
+  const at = new Map<string, { x: number; z: number }>();
+  items.forEach((it, i) => at.set(it.p.kind + it.p.id, { x: r3(it.x + du[i] * U[0] + dv[i] * V[0]), z: r3(it.z + du[i] * U[1] + dv[i] * V[1]) }));
+  for (const it of items) {
+    if (it.p.kind !== 'block') continue;
+    const b = d.blocks.find((q) => q.id === it.p.id)!, shed = b.shedId ? d.sheds.find((q) => q.id === b.shedId) : null, n = at.get('block' + b.id)!;
+    if (shed && !pointInPoly(n.x, n.z, shed.points)) return { error: `That would move “${b.name}” off ${shed.name}. Use a smaller gap or move the first set.` };
+  }
+  const put = <T extends { id: string; x: number; z: number }>(kind: string, list: T[]) => list.map((o) => { const n = at.get(kind + o.id); return n ? { ...o, ...n } : o; });
+  return { design: { ...d, blocks: put('block', d.blocks), obstructions: put('obstruction', d.obstructions), walkways: put('walkway', d.walkways) } };
+}
 
 // Panel sets on a shed sit on its roof. Rows, columns and position are set by the user.
 // Flat roof: only the height follows the shed. Sloped roof: the set also lies in the roof plane (same tilt and direction).
@@ -40,6 +99,10 @@ export default function Editor() {
   const { design, setDesign, project, mods, error, stale, calculate, calcBusy, calcError } = useDesign(id);
   const scene = useRef<SceneHandle>(null);
   const [sel, setSel] = useState<Selection>(null);
+  const [multi, setMulti] = useState<Pick[]>([]); // Ctrl+click selection; used while nothing single is selected
+  const [gap, setGap] = useState(0.5);
+  const selRef = useRef<Selection>(null), multiRef = useRef<Pick[]>([]);
+  selRef.current = sel; multiRef.current = multi;
   const [view, setView] = useState<'2d' | '3d'>('2d');
   const [tool, setTool] = useState<Tool>('select');
   const [draw, setDraw] = useState<DrawKind | null>(null);
@@ -213,7 +276,14 @@ export default function Editor() {
   };
 
   const events = useMemo(() => ({
-    onSelect: (s: Selection) => setSel(s),
+    onSelect: (s: Selection, add?: boolean) => {
+      if (!add || !s || !MOVABLE.includes(s.kind)) { setMulti([]); setSel(s); return; }
+      const cur = selRef.current;
+      const base = !cur && multiRef.current.length >= 2 ? multiRef.current : cur && MOVABLE.includes(cur.kind) ? [cur] : [];
+      const has = base.some((p) => p.kind === s.kind && p.id === s.id);
+      const next = has ? base.filter((p) => !(p.kind === s.kind && p.id === s.id)) : [...base, s];
+      if (next.length >= 2) { setMulti(next); setSel(null); } else { setMulti([]); setSel(next[0] || null); }
+    },
     onMove: (s: NonNullable<Selection>, x: number, z: number) => {
       if (s.kind === 'block') patchBlock(s.id, { x, z }); else if (s.kind === 'obstruction' || s.kind === 'walkway') patchObj(s.kind === 'obstruction' ? 'obstructions' : 'walkways', s.id, { x, z });
     },
@@ -263,7 +333,7 @@ export default function Editor() {
       else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') { e.preventDefault(); redo(); }
       else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'd' && sel) { e.preventDefault(); duplicate(); }
       else if (e.key === 'Delete' && sel) setConfirmDel(true);
-      else if (e.key === 'Escape') { setTool('select'); setSel(null); }
+      else if (e.key === 'Escape') { setTool('select'); setSel(null); setMulti([]); }
       else if (sel && e.key.startsWith('Arrow')) {
         e.preventDefault();
         const s = e.shiftKey ? 1 : 0.1;
@@ -291,6 +361,19 @@ export default function Editor() {
   const shed = sel?.kind === 'shed' ? design.sheds.find((s) => s.id === sel.id) : null;
   const keep = sel?.kind === 'keepout' ? design.keepouts.find((k) => k.id === sel.id) : null;
   const picked = block || obst || walk || shed || keep;
+  const many = !sel && multi.length >= 2 ? multi.map((p) => footprint(design, mods, p)).filter(Boolean) as NonNullable<ReturnType<typeof footprint>>[] : [];
+  const group = many.length >= 2;
+  const doArrange = (op: ArrangeOp) => {
+    const r = arrange(latest.current!, mods, many.map((m) => m.p), op, gap);
+    if (r.error || !r.design) { setNotice(r.error || 'Nothing to move.'); return; }
+    apply(refit(r.design, mods));
+    setNotice(op === 'row' || op === 'column' ? `Placed ${op === 'row' ? 'side by side' : 'one behind the other'} with a ${fmt(gap)} m gap.` : 'Edges lined up with the first item you selected.');
+  };
+  const removeGroup = () => {
+    const d = latest.current!, gone = (k: string, oid: string) => many.some((m) => m.p.kind === k && m.p.id === oid);
+    apply({ ...d, blocks: d.blocks.filter((b) => !gone('block', b.id)), obstructions: d.obstructions.filter((o) => !gone('obstruction', o.id)), walkways: d.walkways.filter((o) => !gone('walkway', o.id)) });
+    setMulti([]); setNotice(`${many.length} items removed. Undo brings them back.`);
+  };
   const res = design.results;
 
   let hint: string;
@@ -310,7 +393,8 @@ export default function Editor() {
   else if (block?.shedId) hint = 'Drag the set to move it on the shed · arrow keys nudge 0.1 m (Shift = 1 m) · set rows, columns and gaps on the right';
   else if (picked) hint = 'Drag to move · arrow keys nudge 0.1 m (Shift = 1 m) · Delete removes';
   else if (design.sheds.length === 0) hint = 'Step 1: press “Draw shed” and click each corner of the roof on the map.';
-  else hint = view === '2d' ? 'Click a shed or its panels to edit · drag empty space to pan · scroll to zoom' : 'Drag to rotate · right-drag to pan · scroll to zoom';
+  else if (group) hint = `${many.length} items selected · Ctrl + click adds or removes one · line them up or set the gap on the right · Esc clears`;
+  else hint = view === '2d' ? 'Click a shed or its panels to edit · Ctrl + click selects several · drag empty space to pan · scroll to zoom' : 'Drag to rotate · right-drag to pan · scroll to zoom';
 
   return (
     <div className="ed">
@@ -350,7 +434,7 @@ export default function Editor() {
 
       <div className="ed-canvas">
         <SceneView ref={scene} lat={project.lat} lng={project.lng} interactive design={design} mods={mods} results={res}
-          view={view} tool={tool} selected={sel} sun={sun} events={events} draw={draw} />
+          view={view} tool={tool} selected={sel} also={group ? multi : NO_PICKS} sun={sun} events={events} draw={draw} />
         {notice && <div className="hint" style={{ bottom: 58, background: '#1f6b2ee6' }}>{notice}</div>}
         <div className="hint">{hint}</div>
       </div>
@@ -362,7 +446,35 @@ export default function Editor() {
         {block && <BlockPanel b={block} design={design} mods={mods} patch={(p) => patchBlock(block.id, p)} onDuplicate={duplicate} onDelete={() => setConfirmDel(true)}
           onPanelsTool={() => { setTool('panels'); setSel(null); }} onShed={() => block.shedId && setSel({ kind: 'shed', id: block.shedId })} />}
         {(obst || walk) && <BoxPanel o={(obst || walk)!} walkway={!!walk} roof={shedUnder(design, (obst || walk)!.x, (obst || walk)!.z)?.name || ''} patch={(p) => patchObj(obst ? 'obstructions' : 'walkways', (obst || walk)!.id, p)} onDuplicate={duplicate} onDelete={() => setConfirmDel(true)} />}
-        {!picked && (
+        {group && (
+          <>
+            <h3>{many.length} items selected</h3>
+            <div className="ed-sec"><div className="t">Selected</div>
+              {many.map((m, i) => <div className="kv" key={m.p.kind + m.p.id}><span>{m.name}</span><b style={{ fontWeight: 400 }}>{i === 0 ? 'stays in place' : m.p.kind === 'block' ? 'panel set' : m.p.kind}</b></div>)}
+              <div style={{ color: 'var(--ed-muted)', fontSize: 12 }}>Ctrl + click an item on the map to add or remove it. Everything lines up with the first one in this list.</div>
+            </div>
+            <div className="ed-sec"><div className="t">Line up edges</div>
+              <div className="eseg" style={{ marginBottom: 7 }}>
+                <button onClick={() => doArrange('top')}>Top</button>
+                <button onClick={() => doArrange('bottom')}>Bottom</button>
+                <button onClick={() => doArrange('left')}>Left</button>
+                <button onClick={() => doArrange('right')}>Right</button>
+              </div>
+              <div style={{ color: 'var(--ed-muted)', fontSize: 12 }}>Top is the back (upper) edge of the first item, bottom is its front (lower) edge.</div>
+            </div>
+            <div className="ed-sec"><div className="t">Keep next to each other</div>
+              <div className="ef"><label>Gap between them<small>0 = touching</small></label><Num value={gap} min={0} max={100} step={0.05} unit="m" onCommit={(v) => setGap(v)} /></div>
+              <button className="ebtn primary block" onClick={() => doArrange('row')}>Place side by side with this gap</button>
+              <button className="ebtn block" style={{ marginTop: 6 }} onClick={() => doArrange('column')}>Place one behind the other with this gap</button>
+              <div style={{ color: 'var(--ed-muted)', fontSize: 12, marginTop: 6 }}>The items keep their current order. Use “Top” or “Left” first if they should also share an edge.</div>
+            </div>
+            <div className="row" style={{ gap: 6 }}>
+              <button className="ebtn grow" style={{ justifyContent: 'center' }} onClick={() => setMulti([])}>Clear selection</button>
+              <button className="ebtn danger grow" style={{ justifyContent: 'center' }} onClick={removeGroup}>🗑 Delete all</button>
+            </div>
+          </>
+        )}
+        {!picked && !group && (
           <>
             <h3>Design summary</h3>
             <div className="kv"><span>Shed area</span><b>{design.sheds.length ? `${fmt(totals.shedArea)} m²` : '-'}</b></div>

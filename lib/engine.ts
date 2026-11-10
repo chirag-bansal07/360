@@ -12,7 +12,7 @@ export type DrawKind = 'shed' | 'keepout';
 export type ColorMode = 'normal' | 'access' | 'irradiance';
 export type Tool = 'select' | 'panels';
 export type EngineEvents = {
-  onSelect?: (s: Selection) => void;
+  onSelect?: (s: Selection, add?: boolean) => void; // add = Ctrl / Cmd / Shift was held
   onMove?: (s: NonNullable<Selection>, x: number, z: number) => void;
   onTogglePanel?: (blockId: string, key: string, action: 'remove' | 'add') => void;
   onHover?: (h: { action: 'remove' | 'add'; x: number; y: number } | null) => void;
@@ -97,6 +97,7 @@ export class Engine {
   private view: '2d' | '3d' = '2d';
   private tool: Tool = 'select';
   private selected: Selection = null;
+  private also: NonNullable<Selection>[] = []; // further items highlighted in a multi-selection
   private colorMode: ColorMode = 'normal';
   private sunDir: [number, number, number] | null = null;
   private design: Design | null = null;
@@ -409,9 +410,10 @@ export class Engine {
     if (redo) this.rebuild(); else this.applySelection(); // corner handles belong to the selected outline
     this.dirty = true;
   }
+  setAlso(list: NonNullable<Selection>[]) { this.also = list; this.applySelection(); this.dirty = true; }
   private applySelection() {
     for (const o of this.outlines) {
-      const sel = !!this.selected && this.selected.kind === o.kind && this.selected.id === o.id;
+      const sel = (!!this.selected && this.selected.kind === o.kind && this.selected.id === o.id) || this.also.some((a) => a.kind === o.kind && a.id === o.id);
       const mat = o.line.material as THREE.LineBasicMaterial;
       mat.color.set(sel ? '#ff8a00' : o.kind === 'keepout' ? '#e5484d' : '#ffffff');
       mat.opacity = sel ? 1 : o.kind === 'block' ? 0.55 : o.kind === 'shed' || o.kind === 'keepout' ? 0.9 : 0.4;
@@ -615,14 +617,16 @@ export class Engine {
     const hit = this.pick(e);
     const sel = hit?.object.userData.sel as NonNullable<Selection> | undefined;
     if (hit && sel) {
-      const gp = hit.object.userData.locked ? null : this.groundPoint(e);
+      const add = e.ctrlKey || e.metaKey || e.shiftKey;
+      const gp = hit.object.userData.locked || add ? null : this.groundPoint(e); // Ctrl+click only selects, it never drags
       const obj = this.rootOf(hit.object);
+      if (add) { this.controls.enabled = false; setTimeout(() => { if (!this.drag && !this.vdrag) this.controls.enabled = true; }, 0); }
       if (gp) {
         this.drag = { sel, obj, ox: obj.position.x, oz: obj.position.z, gx: gp.x, gz: gp.z, moved: false };
         this.controls.enabled = false;
         this.renderer.domElement.setPointerCapture(e.pointerId);
       }
-      this.events.onSelect?.(sel);
+      this.events.onSelect?.(sel, add);
     }
   };
 
