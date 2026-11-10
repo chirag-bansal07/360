@@ -3,7 +3,7 @@ import { randomBytes, scrypt as scryptCb, timingSafeEqual } from 'crypto';
 import { promisify } from 'util';
 import { cookies } from 'next/headers';
 import { COOKIE, HOSTED, MAX_AGE, signSession, verifySession } from './session';
-import { ensureSchema, sql } from './pg';
+import { ensureSchema, forgetSession, sql } from './pg';
 import { uid } from './catalog';
 
 const scrypt = promisify(scryptCb) as (pw: string, salt: Buffer, len: number) => Promise<Buffer>;
@@ -23,17 +23,26 @@ export async function checkPassword(pw: string, stored: string): Promise<boolean
 export const cleanEmail = (e: any) => String(e || '').trim().toLowerCase();
 export const validEmail = (e: string) => e.length <= 200 && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e);
 
-export async function startSession(userId: string) {
-  (await cookies()).set(COOKIE, signSession(userId), { httpOnly: true, secure: true, sameSite: 'lax', path: '/', maxAge: MAX_AGE });
+export async function startSession(userId: string, version: number) {
+  (await cookies()).set(COOKIE, signSession(userId, version), { httpOnly: true, secure: true, sameSite: 'lax', path: '/', maxAge: MAX_AGE });
 }
+// Signing out raises the session version, which cancels the cookie on every device.
 export async function endSession() {
-  (await cookies()).set(COOKIE, '', { httpOnly: true, secure: true, sameSite: 'lax', path: '/', maxAge: 0 });
+  const jar = await cookies();
+  const s = verifySession(jar.get(COOKIE)?.value);
+  if (s) {
+    await ensureSchema();
+    await sql()`update users set sv = sv + 1 where id = ${s.userId} and sv = ${s.version}`;
+    forgetSession(s.userId);
+  }
+  jar.set(COOKIE, '', { httpOnly: true, secure: true, sameSite: 'lax', path: '/', maxAge: 0 });
 }
 
 // The signed-in user's id. Local mode has one built-in user.
+// The request guard (proxy.ts) has already checked the session version against the database.
 export async function currentUserId(): Promise<string | null> {
   if (!HOSTED) return 'local';
-  return verifySession((await cookies()).get(COOKIE)?.value);
+  return verifySession((await cookies()).get(COOKIE)?.value)?.userId || null;
 }
 
 export class AuthError extends Error {}
@@ -43,15 +52,11 @@ export async function requireUserId(): Promise<string> {
   return id;
 }
 
-// The first account can be created freely (the owner). After that a sign-up code is needed, if one is configured.
-export async function signupState(): Promise<{ open: boolean; needsCode: boolean }> {
-  await ensureSchema();
-  const rows = (await sql()`select count(*)::int as n from users`) as any[];
-  if (rows[0].n === 0) return { open: true, needsCode: false };
-  return { open: !!process.env.SIGNUP_CODE, needsCode: true };
-}
+// Every new account needs the sign-up code (SIGNUP_CODE, at least 12 characters). Without one, sign-up is closed.
+const signupCode = () => { const c = process.env.SIGNUP_CODE || ''; return c.length >= 12 ? c : ''; };
+export const signupOpen = () => !!signupCode();
 export function codeMatches(code: any): boolean {
-  const want = Buffer.from(process.env.SIGNUP_CODE || ''), got = Buffer.from(String(code || ''));
+  const want = Buffer.from(signupCode()), got = Buffer.from(String(code || ''));
   return want.length > 0 && want.length === got.length && timingSafeEqual(want, got);
 }
 
@@ -63,21 +68,24 @@ export async function createUser(email: string, name: string, password: string):
   return rows.length ? id : null;
 }
 
-// Checks a sign-in. Eight wrong passwords in a row lock the account for 15 minutes.
-export async function login(email: string, password: string): Promise<{ id?: string; error?: string }> {
+// Checks a sign-in. The attempt is counted and the lock is checked in one database statement, so parallel
+// guesses cannot slip past the limit: eight wrong passwords in a row lock the account for 15 minutes.
+// Unknown email, wrong password and locked account all give the same answer.
+export const LOGIN_FAILED = 'The email or password is not correct. After several wrong attempts an account is paused for 15 minutes.';
+export async function login(email: string, password: string): Promise<{ id: string; version: number } | null> {
   await ensureSchema();
   const q = sql();
-  const rows = (await q`select id, pass, failed, locked_until from users where email = ${email}`) as any[];
-  const bad = { error: 'The email or password is not correct.' };
-  if (!rows.length) { await hashPassword(password); return bad; } // same work either way
+  const rows = (await q`
+    update users set
+      failed = case when locked_until is not null then 1 else failed + 1 end,
+      locked_until = case when (case when locked_until is not null then 1 else failed + 1 end) >= 8 then now() + interval '15 minutes' else null end
+    where email = ${email} and (locked_until is null or locked_until < now())
+    returning id, pass, sv`) as any[];
+  if (!rows.length) { await hashPassword(password); return null; } // unknown or locked: same work, same answer
   const u = rows[0];
-  if (u.locked_until && new Date(u.locked_until).getTime() > Date.now()) return { error: 'Too many wrong attempts. Try again in 15 minutes.' };
-  if (!(await checkPassword(password, u.pass))) {
-    await q`update users set failed = failed + 1, locked_until = case when failed + 1 >= 8 then now() + interval '15 minutes' else null end where id = ${u.id}`;
-    return bad;
-  }
+  if (!(await checkPassword(password, u.pass))) return null;
   await q`update users set failed = 0, locked_until = null where id = ${u.id}`;
-  return { id: u.id };
+  return { id: u.id, version: u.sv };
 }
 
 export async function userInfo(id: string): Promise<{ email: string; name: string } | null> {

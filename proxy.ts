@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { COOKIE, HOSTED, verifySession } from '@/lib/session';
+import { sessionVersion } from '@/lib/pg';
 
 // Guards every page and the data API.
 //  - On this computer: requests must be addressed to a local host name (stops DNS-rebinding from other sites).
@@ -11,7 +12,7 @@ const extra = (process.env.SUNMOUNT_HOSTS || '').split(',').map((h) => h.trim().
 const hostName = (h: string) => h.toLowerCase().replace(/:\d+$/, '');
 const deny = (msg: string, status = 403) => NextResponse.json({ error: msg }, { status });
 
-export function proxy(req: NextRequest) {
+export async function proxy(req: NextRequest) {
   const { pathname } = req.nextUrl;
   const isApi = pathname.startsWith('/api/');
   const host = req.headers.get('host') || '';
@@ -31,13 +32,27 @@ export function proxy(req: NextRequest) {
 
   if (HOSTED) {
     const open = pathname === '/login' || pathname.startsWith('/api/auth/');
-    let user: string | null = null;
-    try { user = verifySession(req.cookies.get(COOKIE)?.value); } catch { return deny('The server is not set up yet (missing session secret).', 500); }
-    if (!user && !open) {
+    let signedIn = false;
+    try {
+      const s = verifySession(req.cookies.get(COOKIE)?.value);
+      // the cookie must also carry the user's current session version (signing out raises it)
+      if (s) signedIn = (await sessionVersion(s.userId)) === s.version;
+    } catch {
+      return deny('The server is not ready (session check failed). Try again shortly.', 503);
+    }
+    if (!signedIn && !open) {
       if (isApi) return deny('Please sign in.', 401);
       return NextResponse.redirect(new URL('/login', req.url));
     }
-    if (user && pathname === '/login') return NextResponse.redirect(new URL('/', req.url));
+    if (signedIn && pathname === '/login') return NextResponse.redirect(new URL('/', req.url));
+    if (!signedIn && req.cookies.has(COOKIE) && open) {
+      // a stale cookie must not reach the handlers behind the open paths
+      const headers = new Headers(req.headers);
+      headers.delete('cookie');
+      const res = NextResponse.next({ request: { headers } });
+      res.cookies.set(COOKIE, '', { path: '/', maxAge: 0 });
+      return res;
+    }
   } else if (pathname === '/login') {
     return NextResponse.redirect(new URL('/', req.url));
   }

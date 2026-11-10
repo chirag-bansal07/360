@@ -1,11 +1,9 @@
 'use client';
 import { useEffect, useState } from 'react';
 
-type Signup = { open: boolean; needsCode: boolean } | null;
-
 export default function LoginPage() {
   const [mode, setMode] = useState<'login' | 'signup'>('login');
-  const [signup, setSignup] = useState<Signup>(null);
+  const [canSignup, setCanSignup] = useState(false);
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -14,10 +12,7 @@ export default function LoginPage() {
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    fetch('/api/auth/me').then((r) => r.json()).then((d) => {
-      setSignup(d.signup || null);
-      if (d.signup?.open && !d.signup.needsCode) setMode('signup'); // nobody has an account yet
-    }).catch(() => {});
+    fetch('/api/auth/me').then((r) => r.json()).then((d) => setCanSignup(!!d.signupOpen)).catch(() => {});
   }, []);
 
   async function submit(e: React.FormEvent) {
@@ -34,23 +29,22 @@ export default function LoginPage() {
     }
   }
 
-  const first = !!signup?.open && !signup.needsCode;
   return (
     <div style={{ minHeight: '100vh', display: 'grid', placeItems: 'center', background: 'var(--bg, #f3f5f7)', padding: 20 }}>
       <form onSubmit={submit} className="card" style={{ width: '100%', maxWidth: 400 }}>
         <div className="card-body">
           <div className="brand" style={{ marginBottom: 6 }}><span className="brand-mark" /><span>Sunmount<small>360</small></span></div>
-          <h1 style={{ fontSize: 20, margin: '10px 0 4px' }}>{mode === 'login' ? 'Sign in' : first ? 'Create the owner account' : 'Create an account'}</h1>
+          <h1 style={{ fontSize: 20, margin: '10px 0 4px' }}>{mode === 'login' ? 'Sign in' : 'Create an account'}</h1>
           <p className="muted small" style={{ marginTop: 0 }}>
-            {mode === 'login' ? 'Use the email and password of your Sunmount360 account.' : first ? 'No account exists yet. The first account becomes the owner of this app.' : 'You need the sign-up code from the owner of this app.'}
+            {mode === 'login' ? 'Use the email and password of your Sunmount360 account.' : 'You need the sign-up code from the owner of this app.'}
           </p>
           {error && <div className="error" style={{ marginBottom: 12 }}>{error}</div>}
           {mode === 'signup' && <div style={{ marginBottom: 10 }}><label className="small">Your name</label><input className="input" value={name} onChange={(e) => setName(e.target.value)} autoComplete="name" /></div>}
           <div style={{ marginBottom: 10 }}><label className="small">Email</label><input className="input" type="email" required value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="email" /></div>
           <div style={{ marginBottom: 10 }}><label className="small">Password{mode === 'signup' ? ' (at least 10 characters)' : ''}</label><input className="input" type="password" required minLength={mode === 'signup' ? 10 : 1} value={password} onChange={(e) => setPassword(e.target.value)} autoComplete={mode === 'login' ? 'current-password' : 'new-password'} /></div>
-          {mode === 'signup' && signup?.needsCode && <div style={{ marginBottom: 10 }}><label className="small">Sign-up code</label><input className="input" required value={code} onChange={(e) => setCode(e.target.value)} autoComplete="off" /></div>}
+          {mode === 'signup' && <div style={{ marginBottom: 10 }}><label className="small">Sign-up code</label><input className="input" required value={code} onChange={(e) => setCode(e.target.value)} autoComplete="off" /></div>}
           <button className="btn primary" style={{ width: '100%', justifyContent: 'center', marginTop: 6 }} disabled={busy}>{busy ? 'Please wait…' : mode === 'login' ? 'Sign in' : 'Create account'}</button>
-          {signup?.open && (
+          {canSignup && (
             <p className="small" style={{ textAlign: 'center', marginBottom: 0 }}>
               {mode === 'login'
                 ? <a href="#" onClick={(e) => { e.preventDefault(); setMode('signup'); setError(''); }}>Create an account</a>
