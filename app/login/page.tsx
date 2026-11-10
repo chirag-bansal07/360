@@ -30,12 +30,12 @@ export default function LoginPage() {
   }
 
   return (
-    <div style={{ minHeight: '100vh', display: 'grid', placeItems: 'center', background: 'var(--bg, #f3f5f7)', padding: 20 }}>
-      <form onSubmit={submit} className="card" style={{ width: '100%', maxWidth: 400 }}>
+    <div className="login">
+      <form onSubmit={submit} className="card login-card">
         <div className="card-body">
-          <div className="brand" style={{ marginBottom: 6 }}><span className="brand-mark" /><span>Sunmount<small>360</small></span></div>
-          <h1 style={{ fontSize: 20, margin: '10px 0 4px' }}>{mode === 'login' ? 'Sign in' : 'Create an account'}</h1>
-          <p className="muted small" style={{ marginTop: 0 }}>
+          <div className="brand"><span className="brand-mark" /><span>Sunmount<small>360</small></span></div>
+          <h1>{mode === 'login' ? 'Sign in' : 'Create an account'}</h1>
+          <p className="muted lead">
             {mode === 'login' ? 'Use the email and password of your Sunmount360 account.' : 'You need the sign-up code from the owner of this app.'}
           </p>
           {error && <div className="error" style={{ marginBottom: 12 }}>{error}</div>}
@@ -45,7 +45,7 @@ export default function LoginPage() {
           {mode === 'signup' && <div style={{ marginBottom: 10 }}><label className="small">Sign-up code</label><input className="input" required value={code} onChange={(e) => setCode(e.target.value)} autoComplete="off" /></div>}
           <button className="btn primary" style={{ width: '100%', justifyContent: 'center', marginTop: 6 }} disabled={busy}>{busy ? 'Please wait…' : mode === 'login' ? 'Sign in' : 'Create account'}</button>
           {canSignup && (
-            <p className="small" style={{ textAlign: 'center', marginBottom: 0 }}>
+            <p className="small switch-mode">
               {mode === 'login'
                 ? <a href="#" onClick={(e) => { e.preventDefault(); setMode('signup'); setError(''); }}>Create an account</a>
                 : <a href="#" onClick={(e) => { e.preventDefault(); setMode('login'); setError(''); }}>I already have an account</a>}
