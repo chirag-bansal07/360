@@ -1,13 +1,18 @@
-import { readDb, writeDb, json, fail } from '@/lib/store';
+import { readDb, writeDb, json, fail, getGoogleKey, setGoogleKey } from '@/lib/store';
+import { isAdmin } from '@/lib/auth';
 import { DEFAULT_LOSSES } from '@/lib/catalog';
 
 export const dynamic = 'force-dynamic';
 
 // The Google key is write-only: pages learn only whether one is saved.
-const masked = (s: any) => ({ ...s, googleMapsKey: '', hasGoogleKey: !!s.googleMapsKey });
+// Only the admin can see that a key exists or change it. Company logins get no key information at all.
+async function masked(s: any) {
+  const admin = await isAdmin();
+  return { ...s, googleMapsKey: '', canSetKey: admin, hasGoogleKey: admin ? !!(await getGoogleKey()) : false };
+}
 
 export async function GET() {
-  return json({ settings: masked((await readDb()).settings) });
+  return json({ settings: await masked((await readDb()).settings) });
 }
 
 export async function PUT(req: Request) {
@@ -39,8 +44,12 @@ export async function PUT(req: Request) {
     if (out.inverterEff <= 50 || out.inverterEff > 100) return fail('Inverter efficiency must be between 50 and 100 %.');
     s.losses = out;
   }
-  if (b.removeGoogleKey === true) s.googleMapsKey = '';
-  else if (typeof b.googleMapsKey === 'string' && b.googleMapsKey.trim()) s.googleMapsKey = b.googleMapsKey.trim();
   await writeDb(db);
-  return json({ settings: masked(s) });
+  const newKey = typeof b.googleMapsKey === 'string' ? b.googleMapsKey.trim() : '';
+  if (b.removeGoogleKey === true || newKey) {
+    if (!(await isAdmin())) return fail('Only the admin can change the Google Maps key.', 403);
+    if (newKey.length > 200) return fail('That does not look like a Google Maps key.');
+    await setGoogleKey(b.removeGoogleKey === true ? '' : newKey);
+  }
+  return json({ settings: await masked((await readDb()).settings) });
 }

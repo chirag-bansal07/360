@@ -64,7 +64,10 @@ export async function createUser(email: string, name: string, password: string):
   await ensureSchema();
   const id = 'u' + uid() + uid();
   const pass = await hashPassword(password);
-  const rows = (await sql()`insert into users (id, email, name, pass) values (${id}, ${email}, ${name}, ${pass}) on conflict (email) do nothing returning id`) as any[];
+  // the very first account becomes the admin; every later sign-up is a company login
+  const rows = (await sql()`insert into users (id, email, name, pass, role)
+    select ${id}, ${email}, ${name}, ${pass}, case when exists (select 1 from users) then 'company' else 'admin' end
+    on conflict (email) do nothing returning id`) as any[];
   return rows.length ? id : null;
 }
 
@@ -88,8 +91,15 @@ export async function login(email: string, password: string): Promise<{ id: stri
   return { id: u.id, version: u.sv };
 }
 
-export async function userInfo(id: string): Promise<{ email: string; name: string } | null> {
+export async function userInfo(id: string): Promise<{ email: string; name: string; role: 'admin' | 'company' } | null> {
   await ensureSchema();
-  const rows = (await sql()`select email, name from users where id = ${id}`) as any[];
+  const rows = (await sql()`select email, name, role from users where id = ${id}`) as any[];
   return rows[0] || null;
+}
+
+// The admin runs the app. On a local computer the single user is the admin.
+export async function isAdmin(): Promise<boolean> {
+  if (!HOSTED) return true;
+  const id = await currentUserId();
+  return !!id && (await userInfo(id))?.role === 'admin';
 }

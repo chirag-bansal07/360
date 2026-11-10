@@ -1,4 +1,4 @@
-import { json, readDb } from '@/lib/store';
+import { json, getGoogleKey } from '@/lib/store';
 import { tileXY } from '@/lib/mercator';
 import { googleSession, googleTileUrl } from '@/lib/google';
 
@@ -8,7 +8,7 @@ export const dynamic = 'force-dynamic';
 export async function GET(req: Request) {
   const u = new URL(req.url);
   const lat = Number(u.searchParams.get('lat')), lng = Number(u.searchParams.get('lng'));
-  const key = (await readDb()).settings.googleMapsKey;
+  const key = await getGoogleKey();
   let warning = '';
   if (key) {
     try {

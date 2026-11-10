@@ -9,7 +9,7 @@ const Icon = ({ d }: { d: string }) => (
 
 export default function Shell({ children }: { children: ReactNode }) {
   const path = usePathname();
-  const [me, setMe] = useState<{ hosted: boolean; user: { email: string; name: string } | null } | null>(null);
+  const [me, setMe] = useState<{ hosted: boolean; user: { email: string; name: string; role?: string } | null } | null>(null);
   useEffect(() => { fetch('/api/auth/me').then((r) => r.json()).then(setMe).catch(() => {}); }, []);
   const signOut = async () => { await fetch('/api/auth/logout', { method: 'POST' }).catch(() => {}); window.location.href = '/login'; };
   const on = (p: string) => (p === '/' ? path === '/' : path.startsWith(p));
@@ -24,7 +24,7 @@ export default function Shell({ children }: { children: ReactNode }) {
         </nav>
         <div className="side-foot">Solar plant layout planner<br />
           {me?.hosted
-            ? <>{me.user ? <span style={{ wordBreak: 'break-all' }}>{me.user.name || me.user.email}</span> : null}<br /><a href="#" onClick={(e) => { e.preventDefault(); signOut(); }}>Sign out</a></>
+            ? <>{me.user ? <span style={{ wordBreak: 'break-all' }}>{me.user.name || me.user.email}{me.user.role === 'admin' ? ' · Admin' : ''}</span> : null}<br /><a href="#" onClick={(e) => { e.preventDefault(); signOut(); }}>Sign out</a></>
             : 'Data is saved on this computer.'}
         </div>
       </aside>

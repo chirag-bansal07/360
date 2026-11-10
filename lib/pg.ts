@@ -22,6 +22,10 @@ export function ensureSchema(): Promise<void> {
         id text primary key, email text not null unique, name text not null default '', pass text not null,
         failed int not null default 0, locked_until timestamptz, created_at timestamptz not null default now())`;
       await q`alter table users add column if not exists sv int not null default 0`; // session version: raised on sign-out
+      // role: 'admin' runs the app (Google key), 'company' is a normal sign-up. The oldest account is the admin.
+      await q`alter table users add column if not exists role text not null default 'company'`;
+      await q`update users set role = 'admin' where id = (select id from users order by created_at, id limit 1) and not exists (select 1 from users where role = 'admin')`;
+      await q`create table if not exists app_settings (key text primary key, value text not null)`;
       await q`create table if not exists workspaces (
         user_id text primary key references users(id) on delete cascade, data jsonb not null, updated_at timestamptz not null default now())`;
       await q`create table if not exists rate_limits (key text primary key, n int not null, reset_at timestamptz not null)`;
@@ -40,6 +44,24 @@ export async function allow(key: string, max: number, windowSeconds: number): Pr
       reset_at = case when rate_limits.reset_at < now() then now() + make_interval(secs => ${windowSeconds}) else rate_limits.reset_at end
     returning n`) as any[];
   return rows[0].n <= max;
+}
+
+// App-wide values set by the admin (for example the Google Maps key). Remembered for 30 seconds.
+const appCache = new Map<string, { value: string; at: number }>();
+export async function getAppSetting(key: string): Promise<string> {
+  const hit = appCache.get(key);
+  if (hit && Date.now() - hit.at < 30000) return hit.value;
+  await ensureSchema();
+  const rows = (await sql()`select value from app_settings where key = ${key}`) as any[];
+  const value = rows.length ? String(rows[0].value) : '';
+  appCache.set(key, { value, at: Date.now() });
+  return value;
+}
+export async function setAppSetting(key: string, value: string): Promise<void> {
+  await ensureSchema();
+  if (value) await sql()`insert into app_settings (key, value) values (${key}, ${value}) on conflict (key) do update set value = excluded.value`;
+  else await sql()`delete from app_settings where key = ${key}`;
+  appCache.delete(key);
 }
 
 // Session version of a user, remembered for a short time so pages and map tiles do not query on every request.

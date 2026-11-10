@@ -62,16 +62,16 @@ export default function SettingsPage() {
         </div>
       </div></div>
 
-      <div className="card"><div className="card-head">Sharper satellite imagery (optional)</div><div className="card-body" style={{ maxWidth: 760 }}>
+      {(s as any).canSetKey && <div className="card"><div className="card-head">Sharper satellite imagery (optional) <span className="badge">admin only</span></div><div className="card-body" style={{ maxWidth: 760 }}>
         <div className="field" style={{ gridTemplateColumns: '160px 1fr' }}><label>Google Maps API key</label>
-          <input className="input" type="password" autoComplete="off" placeholder={hasKey ? 'A key is saved. Paste a new one to replace it' : 'Paste your own key here'} value={s.googleMapsKey || ''} onChange={(e) => { setDropKey(false); setS({ ...s, googleMapsKey: e.target.value }); }} />
+          <input className="input" type="text" name="maps-api-key" autoComplete="off" spellCheck={false} data-lpignore="true" data-1p-ignore style={{ WebkitTextSecurity: 'disc' } as any} placeholder={hasKey ? 'A key is saved. Paste a new one to replace it' : 'Paste your own key here'} value={s.googleMapsKey || ''} onChange={(e) => { setDropKey(false); setS({ ...s, googleMapsKey: e.target.value }); }} />
         </div>
         <p className="muted small">Without a key the app uses free Esri imagery, which is soft in many Indian towns (about 0.3 to 0.5 m per pixel). With your own Google key the editor loads Google satellite imagery at zoom 20, which shows shed edges, skylights and turbo vents clearly.</p>
-        <p className="muted small">To get a key: open Google Cloud Console, create a project, turn on billing, enable <b>Map Tiles API</b>, then create an API key under Credentials. Google gives a monthly free allowance; opening one design loads about 100 tiles. The key is stored only in this computer&apos;s data folder.</p>
-        {hasKey && <p className="muted small">A key is saved on this computer. It is never shown again after saving.</p>}
+        <p className="muted small">To get a key: open Google Cloud Console, create a project, turn on billing, enable <b>Map Tiles API</b>, then create an API key under Credentials. Google gives a monthly free allowance; opening one design loads about 100 tiles. The key is saved on the server, is used for every company login, and is never shown again after saving. Company logins do not see this card.</p>
+        {hasKey && <p className="muted small">A key is saved.</p>}
         {dropKey && <p className="muted small">The saved key will be removed when you press Save settings.</p>}
         {hasKey && <button className="btn sm" onClick={() => { setDropKey(true); setS({ ...s, googleMapsKey: '' }); }}>Remove key</button>}
-      </div></div>
+      </div></div>}
 
       <div className="card"><div className="card-head">Solar modules<button className="btn sm" onClick={() => setS({ ...s, customModules: [...s.customModules, { id: 'c' + uid(), name: 'My module', watt: 590, length: 2.278, width: 1.134 }] })}>+ Add your own module</button></div>
         <table className="table">

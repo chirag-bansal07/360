@@ -7,7 +7,7 @@ import type { Db, Design, Project } from './types';
 import { DEFAULT_SETTINGS } from './catalog';
 import { HOSTED } from './session';
 import { requireUserId } from './auth';
-import { ensureSchema, sql } from './pg';
+import { ensureSchema, getAppSetting, setAppSetting, sql } from './pg';
 
 const DIR = path.join(process.cwd(), 'data');
 const FILE = path.join(DIR, 'db.json');
@@ -43,7 +43,7 @@ export async function writeDb(db: Db): Promise<void> {
   if (HOSTED) {
     const userId = await requireUserId();
     await ensureSchema();
-    const data = JSON.stringify(db);
+    const data = JSON.stringify({ ...db, settings: { ...db.settings, googleMapsKey: '' } }); // the key is app-wide, never kept per company
     await sql()`insert into workspaces (user_id, data) values (${userId}, ${data}::jsonb)
       on conflict (user_id) do update set data = excluded.data, updated_at = now()`;
     return;
@@ -52,6 +52,18 @@ export async function writeDb(db: Db): Promise<void> {
   const tmp = FILE + '.tmp';
   fs.writeFileSync(tmp, JSON.stringify(db));
   fs.renameSync(tmp, FILE);
+}
+
+// Google Maps key for sharper imagery. Hosted: one key for the whole app, set by the admin. Local: in the settings file.
+export async function getGoogleKey(): Promise<string> {
+  if (HOSTED) { await requireUserId(); return getAppSetting('googleMapsKey'); }
+  return (await readDb()).settings.googleMapsKey || '';
+}
+export async function setGoogleKey(value: string): Promise<void> {
+  if (HOSTED) { await setAppSetting('googleMapsKey', value); return; }
+  const db = await readDb();
+  db.settings.googleMapsKey = value;
+  await writeDb(db);
 }
 
 export function findDesign(db: Db, designId: string): { project: Project; design: Design; index: number } | null {

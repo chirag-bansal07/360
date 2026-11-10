@@ -1,6 +1,6 @@
 import fs from 'fs';
 import path from 'path';
-import { readDb } from '@/lib/store';
+import { getGoogleKey } from '@/lib/store';
 import { googleSession, googleTileUrl } from '@/lib/google';
 
 export const dynamic = 'force-dynamic';
@@ -13,7 +13,7 @@ export async function GET(req: Request, ctx: { params: Promise<{ z: string; x: s
   if (![z, x, y].every((n) => Number.isInteger(n) && n >= 0) || z > 22) return new Response('bad tile', { status: 400 });
 
   if (new URL(req.url).searchParams.get('p') === 'google') {
-    const key = (await readDb()).settings.googleMapsKey;
+    const key = await getGoogleKey();
     if (!key) return new Response('no key', { status: 404 });
     try {
       const res = await fetch(googleTileUrl(key, await googleSession(key), z, x, y), { signal: AbortSignal.timeout(20000) });
