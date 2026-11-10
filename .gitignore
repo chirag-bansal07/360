@@ -1,0 +1,11 @@
+node_modules
+.next
+data/db.json
+data/tiles
+.remember
+*.tsbuildinfo
+*.pdf
+skill.md
+docs/arka-walkthrough-notes.md
+.env*
+.vercel

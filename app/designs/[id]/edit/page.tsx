@@ -1,0 +1,595 @@
+'use client';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import Link from 'next/link';
+import { useParams, useRouter } from 'next/navigation';
+import SceneView, { SceneHandle } from '@/components/SceneView';
+import Num from '@/components/Num';
+import Confirm from '@/components/Confirm';
+import { useDesign } from '@/lib/useDesign';
+import { api, fmt, fmt0, SHORT_MONTHS } from '@/lib/client';
+import { findModule, newBlock, uid } from '@/lib/catalog';
+import { blockLayout, blockSlots, blockYaw, designTotals, edgeLengths, pointInPoly, polyArea, polyCentre, polyPerimeter, ROOF_CLEARANCE, shedAzimuth, shedRoofY, shedTopY, toWorld } from '@/lib/geometry';
+import { clockToSolar, dayOfYear, sunVector } from '@/lib/sun';
+import type { Block, Design, Keepout, ModuleSpec, Obstruction, Pt, Shed, Walkway } from '@/lib/types';
+import type { DrawKind, Selection, Tool } from '@/lib/engine';
+
+const I = ({ d }: { d: string }) => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d={d} /></svg>;
+const clockLabel = (h: number) => { const hh = Math.floor(h), mm = Math.round((h - hh) * 60); return `${((hh + 11) % 12) + 1}:${String(mm).padStart(2, '0')} ${hh < 12 ? 'AM' : 'PM'}`; };
+const r2 = (n: number) => Math.round(n * 100) / 100;
+
+// Panel sets on a shed sit on its roof. Rows, columns and position are set by the user.
+// Flat roof: only the height follows the shed. Sloped roof: the set also lies in the roof plane (same tilt and direction).
+function refit(d: Design, mods: ModuleSpec[], only?: string): Design {
+  return {
+    ...d, blocks: d.blocks.map((b) => {
+      if (!b.shedId || (only && b.shedId !== only)) return b;
+      const shed = d.sheds.find((s) => s.id === b.shedId);
+      if (!shed) return b;
+      if (!((shed.tilt || 0) > 0)) return { ...b, mountHeight: r2(shed.height + ROOF_CLEARANCE) };
+      const nb: Block = { ...b, mounting: 'flush', tilt: shed.tilt!, azimuth: shed.slopeAz ?? 180 };
+      const L = blockLayout(nb, findModule(mods, nb.moduleId));
+      const [fx, fz] = toWorld(nb.x, nb.z, blockYaw(nb.azimuth), 0, L.depth / 2); // middle of the set's lowest edge
+      return { ...nb, mountHeight: r2(shedRoofY(shed, fx, fz) + ROOF_CLEARANCE) };
+    }),
+  };
+}
+
+export default function Editor() {
+  const { id } = useParams<{ id: string }>();
+  const router = useRouter();
+  const { design, setDesign, project, mods, error, stale, calculate, calcBusy, calcError } = useDesign(id);
+  const scene = useRef<SceneHandle>(null);
+  const [sel, setSel] = useState<Selection>(null);
+  const [view, setView] = useState<'2d' | '3d'>('2d');
+  const [tool, setTool] = useState<Tool>('select');
+  const [draw, setDraw] = useState<DrawKind | null>(null);
+  const [drawInfo, setDrawInfo] = useState<{ points: Pt[]; cursor: Pt | null } | null>(null);
+  const [notice, setNotice] = useState('');
+  const [sunOn, setSunOn] = useState(false);
+  const [month, setMonth] = useState(5);
+  const [hour, setHour] = useState(12);
+  const [status, setStatus] = useState<'saved' | 'unsaved' | 'saving' | 'error'>('saved');
+  const [confirmDel, setConfirmDel] = useState(false);
+  const [, force] = useState(0);
+  const past = useRef<Design[]>([]), future = useRef<Design[]>([]);
+  const latest = useRef<Design | null>(null);
+  const dirty = useRef(false), timer = useRef<any>(null), saving = useRef<Promise<void> | null>(null);
+  latest.current = design;
+
+  // ---------- saving ----------
+  const save = useCallback(async (withThumb = false) => {
+    clearTimeout(timer.current);
+    if (saving.current) await saving.current;
+    const d = latest.current;
+    if (!d || (!dirty.current && !withThumb)) return;
+    dirty.current = false;
+    setStatus('saving');
+    const body: any = { name: d.name, sheds: d.sheds, keepouts: d.keepouts, blocks: d.blocks, obstructions: d.obstructions, walkways: d.walkways, inverter: d.inverter, defaultModuleId: d.defaultModuleId, structureName: d.structureName };
+    if (withThumb) { try { body.thumb = scene.current?.engine()?.snapshot({ size: 480, quality: 0.72 }); } catch { /* picture is optional */ } }
+    saving.current = api(`/api/designs/${id}`, 'PUT', body)
+      .then(() => { if (!dirty.current) setStatus('saved'); })
+      .catch(() => { dirty.current = true; setStatus('error'); })
+      .finally(() => { saving.current = null; });
+    await saving.current;
+  }, [id]);
+
+  const apply = useCallback((next: Design, record = true) => {
+    const cur = latest.current;
+    if (!cur) return;
+    if (record) { past.current.push(cur); if (past.current.length > 80) past.current.shift(); future.current = []; }
+    latest.current = next;
+    setDesign(next);
+    dirty.current = true; setStatus('unsaved');
+    clearTimeout(timer.current);
+    timer.current = setTimeout(() => save(false), 800);
+  }, [save, setDesign]);
+
+  const undo = () => { const p = past.current.pop(); if (!p || !latest.current) return; future.current.push(latest.current); apply({ ...p, results: latest.current.results }, false); setSel(null); force((n) => n + 1); };
+  const redo = () => { const f = future.current.pop(); if (!f || !latest.current) return; past.current.push(latest.current); apply({ ...f, results: latest.current.results }, false); setSel(null); force((n) => n + 1); };
+  const go = async (url: string) => { await save(true); if (dirty.current) return; router.push(url); };
+
+  useEffect(() => {
+    const warn = (e: BeforeUnloadEvent) => { if (dirty.current) { e.preventDefault(); e.returnValue = ''; } };
+    window.addEventListener('beforeunload', warn);
+    return () => { window.removeEventListener('beforeunload', warn); clearTimeout(timer.current); };
+  }, []);
+  useEffect(() => { if (!notice) return; const t = setTimeout(() => setNotice(''), 6000); return () => clearTimeout(t); }, [notice]);
+
+  // ---------- edits ----------
+  const patchBlock = (bid: string, p: Partial<Block>) => {
+    const d = latest.current!;
+    const next = { ...d, blocks: d.blocks.map((b) => {
+      if (b.id !== bid) return b;
+      const nb = { ...b, ...p };
+      nb.removed = nb.removed.filter((k) => { const [r, c] = k.split('-').map(Number); return r < nb.rows && c < nb.cols; });
+      return nb;
+    }) };
+    const b = next.blocks.find((x) => x.id === bid);
+    const shed = b?.shedId ? d.sheds.find((q) => q.id === b.shedId) : null;
+    if (b && shed && ('x' in p || 'z' in p) && !pointInPoly(b.x, b.z, shed.points)) {
+      apply({ ...d }, false); // redraw at the old place
+      setNotice(`Keep the panel set on ${shed.name}. Its centre must stay inside the shed outline.`);
+      return;
+    }
+    apply(b?.shedId ? refit(next, mods, b.shedId) : next);
+  };
+  const patchShed = (sid: string, p: Partial<Shed>) => {
+    const d = latest.current!;
+    apply(refit({ ...d, sheds: d.sheds.map((s) => (s.id === sid ? { ...s, ...p } : s)) }, mods, sid));
+  };
+  const patchKeepout = (kid: string, p: Partial<Keepout>) => {
+    const d = latest.current!;
+    apply({ ...d, keepouts: d.keepouts.map((k) => (k.id === kid ? { ...k, ...p } : k)) });
+  };
+  const patchObj = (kind: 'obstructions' | 'walkways', oid: string, p: any) => {
+    const d = latest.current!;
+    apply({ ...d, [kind]: (d[kind] as any[]).map((o) => (o.id === oid ? { ...o, ...p } : o)) } as Design);
+  };
+  const centre = () => scene.current?.engine()?.viewCentre() || { x: 0, z: 0 };
+
+  const startDraw = (kind: DrawKind) => { setTool('select'); setSel(null); setNotice(''); setDraw(kind); };
+  const stopDraw = () => { setDraw(null); setDrawInfo(null); };
+
+  // adds a manual panel set (rows x columns) on a shed; nothing is filled automatically
+  const addPanels = (shedId?: string) => {
+    const d = latest.current!;
+    if (!d.sheds.length) { setNotice('Draw the shed outline first. Click each corner of the roof on the map.'); startDraw('shed'); return; }
+    const selBlock = sel?.kind === 'block' ? d.blocks.find((b) => b.id === sel.id) : null;
+    const sid = shedId || (sel?.kind === 'shed' ? sel.id : selBlock?.shedId) || (d.sheds.length === 1 ? d.sheds[0].id : '');
+    const shed = d.sheds.find((q) => q.id === sid);
+    if (!shed) { setNotice('Click the shed you want the panels on, then press “Add panel set”.'); return; }
+    const n = d.blocks.filter((b) => b.shedId === shed.id).length + 1;
+    const [cx, cz] = polyCentre(shed.points);
+    const inside = pointInPoly(cx, cz, shed.points);
+    const b: Block = { ...newBlock(d), name: `${shed.name} · set ${n}`, shedId: shed.id, azimuth: shedAzimuth(shed),
+      x: r2(inside ? cx : shed.points[0][0]), z: r2(inside ? cz : shed.points[0][1]), mountHeight: r2(shed.height + ROOF_CLEARANCE) };
+    apply(refit({ ...d, blocks: [...d.blocks, b] }, mods, shed.id));
+    setSel({ kind: 'block', id: b.id }); setTool('select');
+    setNotice(`Panel set added: ${b.rows} rows × ${b.cols} columns. Set rows, columns and gaps on the right, and drag it into place.`);
+  };
+  const clearPanels = (shedId: string) => {
+    const d = latest.current!;
+    apply({ ...d, blocks: d.blocks.filter((b) => b.shedId !== shedId) });
+    setSel({ kind: 'shed', id: shedId }); setTool('select');
+    setNotice('All panels removed from this shed. The outline is kept.');
+  };
+
+  const addObstruction = () => {
+    const d = latest.current!; const c = centre();
+    const o: Obstruction = { id: uid(), name: `Obstruction ${d.obstructions.length + 1}`, x: r2(c.x), z: r2(c.z), w: 2, l: 2, h: 2, rotation: 0 };
+    apply({ ...d, obstructions: [...d.obstructions, o] }); setSel({ kind: 'obstruction', id: o.id }); setTool('select');
+  };
+  const addWalkway = () => {
+    const d = latest.current!; const c = centre();
+    const w: Walkway = { id: uid(), name: `Walkway ${d.walkways.length + 1}`, x: r2(c.x), z: r2(c.z), w: 0.5, l: 10, h: 1, rotation: 90 };
+    apply({ ...d, walkways: [...d.walkways, w] }); setSel({ kind: 'walkway', id: w.id }); setTool('select');
+  };
+  const canDuplicate = !!sel && (sel.kind === 'obstruction' || sel.kind === 'walkway' || sel.kind === 'block');
+  const duplicate = () => {
+    const d = latest.current!; if (!sel || !canDuplicate) return;
+    if (sel.kind === 'block') {
+      const b = d.blocks.find((x) => x.id === sel.id); if (!b) return;
+      const L = blockSlots(b, findModule(mods, b.moduleId), d).L;
+      const sh = b.shedId ? d.sheds.find((q) => q.id === b.shedId) : null;
+      const off = sh ? 0 : L.width + 1; // a copy on a shed starts on top of the original, ready to drag
+      const nb = { ...b, id: uid(), name: sh ? `${sh.name} · set ${d.blocks.filter((q) => q.shedId === sh.id).length + 1}` : `Block ${d.blocks.length + 1}`, removed: [...b.removed], x: r2(b.x + off) };
+      apply({ ...d, blocks: [...d.blocks, nb] }); setSel({ kind: 'block', id: nb.id });
+    } else {
+      const kind = sel.kind === 'obstruction' ? 'obstructions' : 'walkways';
+      const o = (d[kind] as any[]).find((x) => x.id === sel.id); if (!o) return;
+      const no = { ...o, id: uid(), x: r2(o.x + o.w + 1) };
+      apply({ ...d, [kind]: [...(d[kind] as any[]), no] } as Design); setSel({ kind: sel.kind, id: no.id });
+    }
+  };
+  const removeSelected = () => {
+    const d = latest.current!; if (!sel) return;
+    const is = (k: string, oid: string) => sel.kind === k && oid === sel.id;
+    apply({
+      ...d,
+      sheds: d.sheds.filter((s) => !is('shed', s.id)),
+      keepouts: d.keepouts.filter((k) => !is('keepout', k.id)),
+      blocks: d.blocks.filter((b) => !is('block', b.id) && !(sel.kind === 'shed' && b.shedId === sel.id)),
+      obstructions: d.obstructions.filter((o) => !is('obstruction', o.id)),
+      walkways: d.walkways.filter((o) => !is('walkway', o.id)),
+    });
+    setSel(null); setConfirmDel(false);
+  };
+  const nudge = (dx: number, dz: number) => {
+    const d = latest.current!; if (!sel) return;
+    if (sel.kind === 'block') { const b = d.blocks.find((x) => x.id === sel.id); if (b) patchBlock(b.id, { x: r2(b.x + dx), z: r2(b.z + dz) }); }
+    else if (sel.kind === 'obstruction' || sel.kind === 'walkway') { const kind = sel.kind === 'obstruction' ? 'obstructions' : 'walkways'; const o = (d[kind] as any[]).find((x) => x.id === sel.id); if (o) patchObj(kind, o.id, { x: r2(o.x + dx), z: r2(o.z + dz) }); }
+    else if (sel.kind === 'shed') { const s = d.sheds.find((x) => x.id === sel.id); if (s) apply({ ...d, sheds: d.sheds.map((q) => (q.id === s.id ? { ...q, points: q.points.map(([x, z]) => [r2(x + dx), r2(z + dz)] as Pt) } : q)), blocks: d.blocks.map((b) => (b.shedId === s.id ? { ...b, x: r2(b.x + dx), z: r2(b.z + dz) } : b)) }); }
+    else if (sel.kind === 'keepout') { const k = d.keepouts.find((x) => x.id === sel.id); if (k) patchKeepout(k.id, { points: k.points.map(([x, z]) => [r2(x + dx), r2(z + dz)] as Pt) }); }
+  };
+
+  const events = useMemo(() => ({
+    onSelect: (s: Selection) => setSel(s),
+    onMove: (s: NonNullable<Selection>, x: number, z: number) => {
+      if (s.kind === 'block') patchBlock(s.id, { x, z }); else if (s.kind === 'obstruction' || s.kind === 'walkway') patchObj(s.kind === 'obstruction' ? 'obstructions' : 'walkways', s.id, { x, z });
+    },
+    onTogglePanel: (bid: string, key: string, action: 'remove' | 'add') => {
+      const b = latest.current!.blocks.find((x) => x.id === bid); if (!b) return;
+      patchBlock(bid, { removed: action === 'remove' ? [...b.removed, key] : b.removed.filter((k) => k !== key) });
+    },
+    onVertexMove: (kind: DrawKind, sid: string, index: number, x: number, z: number) => {
+      const d = latest.current!;
+      const move = (pts: Pt[]) => pts.map((p, i) => (i === index ? ([x, z] as Pt) : p));
+      if (kind === 'shed') { const s = d.sheds.find((q) => q.id === sid); if (s) patchShed(sid, { points: move(s.points) }); }
+      else { const k = d.keepouts.find((q) => q.id === sid); if (k) patchKeepout(sid, { points: move(k.points) }); }
+    },
+    onDraw: (info: { kind: DrawKind; points: Pt[]; cursor: Pt | null } | null) => setDrawInfo(info),
+    onDrawDone: (kind: DrawKind, points: Pt[]) => {
+      const d = latest.current!;
+      setDraw(null); setDrawInfo(null);
+      if (polyArea(points) < 1) { setNotice('That outline is too small. Zoom in and click the corners again.'); return; }
+      if (kind === 'shed') {
+        const shed: Shed = { id: uid(), name: `Shed ${d.sheds.length + 1}`, points, height: 6, setback: 0.3 };
+        // the outline only: panels are added from the Panels section
+        apply({ ...d, sheds: [...d.sheds, shed] }); setSel({ kind: 'shed', id: shed.id });
+        setNotice(`Shed measured: ${fmt(polyArea(points))} m². No panels yet: press “Add panel set” under 2 · Panels and enter rows and columns.`);
+      } else {
+        const k: Keepout = { id: uid(), name: `No-panel area ${d.keepouts.length + 1}`, points };
+        const before = designTotals(d, mods).modules;
+        const next = { ...d, keepouts: [...d.keepouts, k] };
+        apply(next); setSel({ kind: 'keepout', id: k.id });
+        const gone = before - designTotals(next, mods).modules;
+        setNotice(`No-panel area marked: ${fmt(polyArea(points))} m². ${gone ? `${gone} panels removed from it.` : 'Panels will stay out of it.'}`);
+      }
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }), [apply, mods]);
+
+  useEffect(() => {
+    const key = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement;
+      if (t && ['INPUT', 'SELECT', 'TEXTAREA'].includes(t.tagName)) return;
+      if (draw) {
+        if (e.key === 'Enter') { if (!scene.current?.engine()?.finishDraw()) setNotice('Click at least 3 corners before finishing.'); }
+        else if (e.key === 'Escape') stopDraw();
+        else if (e.key === 'Backspace') { e.preventDefault(); scene.current?.engine()?.undoDrawPoint(); }
+        return;
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); e.shiftKey ? redo() : undo(); }
+      else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') { e.preventDefault(); redo(); }
+      else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'd' && sel) { e.preventDefault(); duplicate(); }
+      else if (e.key === 'Delete' && sel) setConfirmDel(true);
+      else if (e.key === 'Escape') { setTool('select'); setSel(null); }
+      else if (sel && e.key.startsWith('Arrow')) {
+        e.preventDefault();
+        const s = e.shiftKey ? 1 : 0.1;
+        nudge(e.key === 'ArrowLeft' ? -s : e.key === 'ArrowRight' ? s : 0, e.key === 'ArrowUp' ? -s : e.key === 'ArrowDown' ? s : 0);
+      }
+    };
+    window.addEventListener('keydown', key);
+    return () => window.removeEventListener('keydown', key);
+  });
+
+  const sun = useMemo(() => {
+    if (!sunOn || !project) return null;
+    const n = dayOfYear(month, 21);
+    return sunVector(project.lat, n, clockToSolar(hour, n, project.lng, project.utcOffset));
+  }, [sunOn, month, hour, project]);
+
+  if (!design || !project) {
+    return <div className="ed" style={{ display: 'grid', placeItems: 'center', gridTemplateColumns: '1fr', gridTemplateRows: '1fr' }}>{error ? <div className="eerr">{error} <Link href="/projects"><u>Back to projects</u></Link></div> : 'Loading design…'}</div>;
+  }
+
+  const totals = designTotals(design, mods);
+  const block = sel?.kind === 'block' ? design.blocks.find((b) => b.id === sel.id) : null;
+  const obst = sel?.kind === 'obstruction' ? design.obstructions.find((o) => o.id === sel.id) : null;
+  const walk = sel?.kind === 'walkway' ? design.walkways.find((o) => o.id === sel.id) : null;
+  const shed = sel?.kind === 'shed' ? design.sheds.find((s) => s.id === sel.id) : null;
+  const keep = sel?.kind === 'keepout' ? design.keepouts.find((k) => k.id === sel.id) : null;
+  const picked = block || obst || walk || shed || keep;
+  const res = design.results;
+
+  let hint: string;
+  if (draw) {
+    const pts = drawInfo?.points || [], cur = drawInfo?.cursor;
+    const what = draw === 'shed' ? 'shed roof' : 'area where panels must not go';
+    if (!pts.length) hint = `Click the first corner of the ${what}. Scroll to zoom in for accuracy · Esc cancels`;
+    else {
+      const last = pts[pts.length - 1];
+      const side = cur ? Math.hypot(cur[0] - last[0], cur[1] - last[1]) : 0;
+      const area = pts.length + (cur ? 1 : 0) >= 3 ? polyArea(cur ? [...pts, cur] : pts) : 0;
+      hint = `${pts.length} corner${pts.length > 1 ? 's' : ''} · this side ${fmt(side)} m${area ? ` · area ${fmt(area)} m²` : ''} · ${pts.length >= 3 ? 'click the first corner or press Enter to finish' : 'keep clicking corners'} · Backspace undoes · Esc cancels`;
+    }
+  } else if (tool === 'panels') hint = 'Click a panel to remove it. Click a faded slot to put the panel back. Press Esc when done.';
+  else if (shed && !design.blocks.some((b) => b.shedId === shed.id)) hint = 'Shed outline ready, no panels on it yet. Press “Add panel set”, then enter rows and columns.';
+  else if (shed || keep) hint ='Drag the orange corner dots to adjust the outline · arrow keys move it 0.1 m (Shift = 1 m)';
+  else if (block?.shedId) hint = 'Drag the set to move it on the shed · arrow keys nudge 0.1 m (Shift = 1 m) · set rows, columns and gaps on the right';
+  else if (picked) hint = 'Drag to move · arrow keys nudge 0.1 m (Shift = 1 m) · Delete removes';
+  else if (design.sheds.length === 0) hint = 'Step 1: press “Draw shed” and click each corner of the roof on the map.';
+  else hint = view === '2d' ? 'Click a shed or its panels to edit · drag empty space to pan · scroll to zoom' : 'Drag to rotate · right-drag to pan · scroll to zoom';
+
+  return (
+    <div className="ed">
+      <div className="ed-top">
+        <button className="ebtn" onClick={() => go(`/designs/${id}`)}>← Design summary</button>
+        <span className="sep" />
+        <span className="name">{project.name}</span><span style={{ color: 'var(--ed-muted)' }}>/ {design.name}</span>
+        <span className="sep" />
+        <button className="ebtn" onClick={undo} disabled={!past.current.length} title="Undo (Ctrl+Z)">↶ Undo</button>
+        <button className="ebtn" onClick={redo} disabled={!future.current.length} title="Redo (Ctrl+Y)">↷ Redo</button>
+        <span className="small" style={{ color: status === 'error' ? '#ff9a9a' : 'var(--ed-muted)' }}>
+          {status === 'saved' ? '✓ Saved' : status === 'saving' ? 'Saving…' : status === 'unsaved' ? 'Unsaved changes…' : <>Could not save. <u style={{ cursor: 'pointer' }} onClick={() => save(false)}>Retry</u></>}
+        </span>
+        <span className="grow" />
+        <div className="eseg" style={{ width: 150 }}>
+          <button className={view === '2d' ? 'on' : ''} onClick={() => setView('2d')}>2D plan</button>
+          <button className={view === '3d' ? 'on' : ''} onClick={() => setView('3d')}>3D</button>
+        </div>
+        <button className="ebtn" onClick={() => go(`/designs/${id}/view`)}>3D view ↗</button>
+        <button className="ebtn primary" onClick={() => go(`/designs/${id}/report`)}>Report ↗</button>
+      </div>
+
+      <div className="ed-tools">
+        <div className="tools-label">1 · Roof</div>
+        <button className={`tool ${draw === 'shed' ? 'on' : ''}`} onClick={() => (draw === 'shed' ? stopDraw() : startDraw('shed'))} title="Click the corners of the shed roof"><I d="M3 11l9-6 9 6M5 10v9h14v-9M9 19v-5h6v5" />Draw shed</button>
+        <button className={`tool ${draw === 'keepout' ? 'on' : ''}`} onClick={() => (draw === 'keepout' ? stopDraw() : startDraw('keepout'))} title="Mark skylights, vents or any area that must stay free"><I d="M5 5h14v14H5zM5 5l14 14M19 5L5 19" />No-panel area</button>
+        <div className="tools-label">2 · Panels</div>
+        <button className="tool" onClick={() => { stopDraw(); addPanels(); }} title="Add a set of panels with your own rows and columns"><I d="M3 5h18v14H3zM3 12h18M9 5v14M15 5v14" />Add panel set</button>
+        <button className={`tool ${tool === 'panels' && !draw ? 'on' : ''}`} onClick={() => { stopDraw(); setTool('panels'); setSel(null); }} disabled={!design.blocks.length} title="Add or remove single panels by clicking"><I d="M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM15 16.5h4M17 14.5v4" />Add / remove panels</button>
+        <div className="tools-label">3 · Extras</div>
+        <button className="tool" onClick={() => { stopDraw(); addObstruction(); }}><I d="M4 8l8-4 8 4v8l-8 4-8-4zM4 8l8 4 8-4M12 12v8" />Add obstruction</button>
+        <button className="tool" onClick={() => { stopDraw(); addWalkway(); }}><I d="M4 20L9 4M20 20L15 4M12 6v2M12 11v2M12 16v2" />Add walkway</button>
+        <div className="tools-label">View</div>
+        <button className={`tool ${tool === 'select' && !draw ? 'on' : ''}`} onClick={() => { stopDraw(); setTool('select'); }}><I d="M5 3l14 7-6 2-2 6z" />Select</button>
+        <button className="tool" onClick={() => scene.current?.engine()?.fit()}><I d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" />Fit to layout</button>
+      </div>
+
+      <div className="ed-canvas">
+        <SceneView ref={scene} lat={project.lat} lng={project.lng} interactive design={design} mods={mods} results={res}
+          view={view} tool={tool} selected={sel} sun={sun} events={events} draw={draw} />
+        {notice && <div className="hint" style={{ bottom: 58, background: '#1f6b2ee6' }}>{notice}</div>}
+        <div className="hint">{hint}</div>
+      </div>
+
+      <div className="ed-side">
+        {shed && <ShedPanel s={shed} design={design} mods={mods} patch={(p) => patchShed(shed.id, p)} onDelete={() => setConfirmDel(true)}
+          onPanels={() => addPanels(shed.id)} onPick={(bid) => setSel({ kind: 'block', id: bid })} onClear={() => clearPanels(shed.id)} onKeepout={() => startDraw('keepout')} />}
+        {keep && <KeepoutPanel k={keep} patch={(p) => patchKeepout(keep.id, p)} onDelete={() => setConfirmDel(true)} />}
+        {block && <BlockPanel b={block} design={design} mods={mods} patch={(p) => patchBlock(block.id, p)} onDuplicate={duplicate} onDelete={() => setConfirmDel(true)}
+          onPanelsTool={() => { setTool('panels'); setSel(null); }} onShed={() => block.shedId && setSel({ kind: 'shed', id: block.shedId })} />}
+        {(obst || walk) && <BoxPanel o={(obst || walk)!} walkway={!!walk} patch={(p) => patchObj(obst ? 'obstructions' : 'walkways', (obst || walk)!.id, p)} onDuplicate={duplicate} onDelete={() => setConfirmDel(true)} />}
+        {!picked && (
+          <>
+            <h3>Design summary</h3>
+            <div className="kv"><span>Shed area</span><b>{design.sheds.length ? `${fmt(totals.shedArea)} m²` : '-'}</b></div>
+            <div className="kv"><span>DC size</span><b>{fmt(totals.kwp)} kWp</b></div>
+            <div className="kv"><span>Modules</span><b>{totals.modules}</b></div>
+            <div className="kv"><span>AC size</span><b>{fmt(totals.acKw)} kW</b></div>
+            <div className="kv"><span>DC:AC ratio</span><b>{totals.acKw ? fmt(totals.ratio) : '-'}</b></div>
+            <div className="kv"><span>Walkways</span><b>{fmt(totals.walkwayLength)} m</b></div>
+            {design.sheds.length === 0 && <button className="ebtn primary block" style={{ marginTop: 8 }} onClick={() => startDraw('shed')}>Draw the shed outline</button>}
+            {design.sheds.length > 0 && (
+              <div className="ed-sec"><div className="t">Sheds</div>
+                {design.sheds.map((s) => {
+                  const n = design.blocks.filter((x) => x.shedId === s.id).reduce((t, b) => t + blockSlots(b, findModule(mods, b.moduleId), design).active.length, 0);
+                  return <button key={s.id} className="ebtn block" style={{ justifyContent: 'space-between', marginBottom: 6 }} onClick={() => setSel({ kind: 'shed', id: s.id })}><span>{s.name}</span><span style={{ color: 'var(--ed-muted)' }}>{fmt(polyArea(s.points), 0)} m² · {n} panels</span></button>;
+                })}
+              </div>
+            )}
+            {totals.kwp > 0 && totals.acKw > 0 && (totals.ratio > 1.5 || totals.ratio < 0.9) && <div className="ewarn">DC:AC ratio is {fmt(totals.ratio)}. Most plants sit between 1.0 and 1.4. Check the inverter size or quantity.</div>}
+
+            <div className="ed-sec"><div className="t">Inverter</div>
+              <div className="ef wide"><input className="einput" value={design.inverter.name} placeholder="Inverter make / model" onChange={(e) => apply({ ...design, inverter: { ...design.inverter, name: e.target.value } })} onKeyDown={(e) => e.stopPropagation()} /></div>
+              <div className="ef"><label>Size of one inverter</label><Num value={design.inverter.kw} min={0.5} max={5000} step={5} unit="kW" onCommit={(v) => apply({ ...design, inverter: { ...design.inverter, kw: v } })} /></div>
+              <div className="ef"><label>Quantity</label><Num value={design.inverter.qty} min={0} max={500} int onCommit={(v) => apply({ ...design, inverter: { ...design.inverter, qty: v } })} /></div>
+              <button className="ebtn block" disabled={!totals.kwp} onClick={() => apply({ ...design, inverter: { ...design.inverter, qty: Math.max(1, Math.round(totals.kwp / 1.25 / design.inverter.kw)) } })}>Suggest quantity for DC:AC ≈ 1.25</button>
+            </div>
+
+            <div className="ed-sec"><div className="t">Defaults for new panels</div>
+              <div className="ef wide"><select className="eselect" value={design.defaultModuleId} onChange={(e) => apply({ ...design, defaultModuleId: e.target.value })}>{mods.map((m) => <option key={m.id} value={m.id}>{m.name} ({m.length} × {m.width} m)</option>)}</select></div>
+              <div className="ef wide"><label>Structure name for the report</label><input className="einput" value={design.structureName} onChange={(e) => apply({ ...design, structureName: e.target.value })} onKeyDown={(e) => e.stopPropagation()} /></div>
+            </div>
+
+            <div className="ed-sec"><div className="t">Generation</div>
+              {res ? (
+                <>
+                  <div className="kv"><span>Annual generation</span><b>{fmt(res.annualAc / 1000)} MWh</b></div>
+                  <div className="kv"><span>Specific generation</span><b>{fmt0(res.specific)} kWh/kWp/yr</b></div>
+                  <div className="kv"><span>Performance ratio</span><b>{fmt(res.pr)} %</b></div>
+                  <div className="kv"><span>Shadow-free time</span><b>{fmt(res.shadeFreePct)} %</b></div>
+                  {stale && <div className="ewarn">The layout changed after this calculation. Calculate again to update.</div>}
+                </>
+              ) : <div style={{ color: 'var(--ed-muted)', fontSize: 13, marginBottom: 8 }}>Not calculated yet.</div>}
+              {calcError && <div className="eerr">{calcError}</div>}
+              <button className="ebtn primary block" style={{ marginTop: 10 }} disabled={calcBusy || totals.modules === 0} onClick={() => calculate(() => save(true))}>{calcBusy ? 'Calculating…' : 'Calculate generation'}</button>
+            </div>
+          </>
+        )}
+
+        <div className="ed-sec"><div className="t">Sun &amp; shadows</div>
+          <label className="switch">Show shadows<input type="checkbox" checked={sunOn} onChange={(e) => setSunOn(e.target.checked)} /></label>
+          {sunOn && (
+            <>
+              <div className="kv"><span>Date</span><b>21 {SHORT_MONTHS[month]}</b></div>
+              <input className="slider" type="range" min={0} max={11} value={month} onChange={(e) => setMonth(+e.target.value)} />
+              <div className="kv"><span>Time</span><b>{clockLabel(hour)}</b></div>
+              <input className="slider" type="range" min={5} max={19} step={0.25} value={hour} onChange={(e) => setHour(+e.target.value)} />
+              {sun && sun[1] <= 0.02 && <div className="ewarn">The sun is below the horizon at this time.</div>}
+            </>
+          )}
+        </div>
+      </div>
+      {confirmDel && sel && picked && <Confirm title="Delete this item?"
+        text={`“${picked.name}” will be removed from the design${shed && design.blocks.some((b) => b.shedId === shed.id) ? ', together with the panels on it' : ''}. You can bring it back with Undo.`}
+        action="Delete" onYes={removeSelected} onNo={() => setConfirmDel(false)} />}
+    </div>
+  );
+}
+
+function Head({ name, onName, onDuplicate, onDelete }: { name: string; onName: (s: string) => void; onDuplicate?: () => void; onDelete: () => void }) {
+  return (
+    <>
+      <div className="ef wide"><input className="einput" style={{ fontWeight: 650, fontSize: 15 }} value={name} onChange={(e) => onName(e.target.value)} onKeyDown={(e) => e.stopPropagation()} /></div>
+      <div className="row" style={{ gap: 6 }}>
+        {onDuplicate && <button className="ebtn grow" style={{ justifyContent: 'center' }} onClick={onDuplicate} title="Ctrl+D">⧉ Duplicate</button>}
+        <button className="ebtn danger grow" style={{ justifyContent: 'center' }} onClick={onDelete}>🗑 Delete</button>
+      </div>
+    </>
+  );
+}
+
+function ShedPanel({ s, design, mods, patch, onDelete, onPanels, onPick, onClear, onKeepout }: { s: Shed; design: Design; mods: ModuleSpec[]; patch: (p: Partial<Shed>) => void; onDelete: () => void; onPanels: () => void; onPick: (id: string) => void; onClear: () => void; onKeepout: () => void }) {
+  const sets = design.blocks.filter((x) => x.shedId === s.id).map((b) => { const m = findModule(mods, b.moduleId); return { b, m, n: blockSlots(b, m, design).active.length }; });
+  const total = sets.reduce((t, x) => t + x.n, 0);
+  const kwp = sets.reduce((t, x) => t + (x.n * x.m.watt) / 1000, 0);
+  const cover = sets.reduce((t, x) => t + x.n * x.m.length * x.m.width, 0);
+  const sides = edgeLengths(s.points);
+  const tilt = s.tilt || 0, az = s.slopeAz ?? shedAzimuth(s);
+  return (
+    <>
+      <Head name={s.name} onName={(name) => patch({ name })} onDelete={onDelete} />
+      <div className="ed-sec"><div className="t">Measured from your outline</div>
+        <div className="kv"><span>{tilt > 0 ? 'Roof area on plan' : 'Roof area'}</span><b>{fmt(polyArea(s.points))} m²</b></div>
+        {tilt > 0 && <div className="kv"><span>Roof sheet area along the slope</span><b>{fmt(polyArea(s.points) / Math.cos((tilt * Math.PI) / 180))} m²</b></div>}
+        <div className="kv"><span>Perimeter</span><b>{fmt(polyPerimeter(s.points))} m</b></div>
+        <div className="kv"><span>Corners</span><b>{s.points.length}</b></div>
+        <div className="kv"><span>Sides</span><b style={{ fontWeight: 400 }}>{sides.map((l) => fmt(l, 1)).join(' · ')} m</b></div>
+      </div>
+      <div className="ed-sec"><div className="t">Shed</div>
+        <div className="ef"><label>Roof height<small>{tilt > 0 ? 'at the lowest edge' : 'above ground'}</small></label><Num value={s.height} min={0} max={80} step={0.5} unit="m" onCommit={(v) => patch({ height: v })} /></div>
+        <div className="ef"><label>Roof tilt<small>0 = flat roof</small></label><Num value={tilt} min={0} max={60} step={0.5} unit="°" onCommit={(v) => patch({ tilt: v, slopeAz: s.slopeAz ?? shedAzimuth(s) })} /></div>
+        {tilt > 0 && (
+          <>
+            <div className="ef"><label>Roof slopes down towards<small>180° = south</small></label><Num value={az} min={0} max={360} step={0.5} unit="°" onCommit={(v) => patch({ slopeAz: v % 360 })} /></div>
+            <div className="eseg" style={{ marginBottom: 7 }}>
+              {[['N', 0], ['E', 90], ['S', 180], ['W', 270]].map(([l, a]) => <button key={l} className={az === a ? 'on' : ''} onClick={() => patch({ slopeAz: a as number })}>{l}</button>)}
+            </div>
+            <div className="eseg" style={{ marginBottom: 7 }}>
+              <button onClick={() => patch({ slopeAz: shedAzimuth(s) })}>Across long side</button>
+              <button onClick={() => patch({ slopeAz: (az + 90) % 360 })}>Turn 90°</button>
+              <button onClick={() => patch({ slopeAz: (az + 180) % 360 })}>Flip</button>
+            </div>
+            <div className="kv"><span>Highest edge of the roof</span><b>{fmt(shedTopY(s))} m</b></div>
+            <div style={{ color: 'var(--ed-muted)', fontSize: 12 }}>Panels on this shed lie on the roof: they take this tilt and direction. For a roof with two slopes, draw one shed per slope.</div>
+          </>
+        )}
+        <div className="ef"><label>Edge margin<small>kept free along every edge</small></label><Num value={s.setback} min={0} max={10} step={0.05} unit="m" onCommit={(v) => patch({ setback: v })} /></div>
+      </div>
+      <div className="ed-sec"><div className="t">Panel sets on this shed</div>
+        {sets.length ? (
+          <>
+            {sets.map(({ b, n }) => <button key={b.id} className="ebtn block" style={{ justifyContent: 'space-between', marginBottom: 6 }} onClick={() => onPick(b.id)}><span>{b.name}</span><span style={{ color: 'var(--ed-muted)' }}>{b.rows} × {b.cols} · {n} panels</span></button>)}
+            <div className="kv"><span>Panels placed</span><b>{total}</b></div>
+            <div className="kv"><span>DC size</span><b>{fmt(kwp)} kWp</b></div>
+            <div className="kv"><span>Roof covered by panels</span><b>{fmt((cover * 100) / Math.max(polyArea(s.points), 0.01), 0)} %</b></div>
+          </>
+        ) : <div style={{ color: 'var(--ed-muted)', fontSize: 13, marginBottom: 8 }}>No panels on this shed yet.</div>}
+        <button className="ebtn primary block" style={{ marginTop: 8 }} onClick={onPanels}>+ Add panel set (rows × columns)</button>
+        {sets.length > 0 && <button className="ebtn danger block" style={{ marginTop: 6 }} onClick={onClear}>Remove all panels from this shed</button>}
+        <button className="ebtn block" style={{ marginTop: 6 }} onClick={onKeepout}>Mark an area where panels cannot go</button>
+      </div>
+      <div className="ewarn">Nothing is filled in automatically. Add as many panel sets as you need and give each its own rows, columns and gaps. Panels that would fall outside this outline are left out.</div>
+    </>
+  );
+}
+
+function KeepoutPanel({ k, patch, onDelete }: { k: Keepout; patch: (p: Partial<Keepout>) => void; onDelete: () => void }) {
+  return (
+    <>
+      <Head name={k.name} onName={(name) => patch({ name })} onDelete={onDelete} />
+      <div className="ed-sec"><div className="t">No-panel area</div>
+        <div className="kv"><span>Area</span><b>{fmt(polyArea(k.points))} m²</b></div>
+        <div className="kv"><span>Corners</span><b>{k.points.length}</b></div>
+      </div>
+      <div className="ewarn">No panel is placed where it would touch this red area. Use it for skylights, turbo vents, damaged sheets or maintenance paths. Drag the orange corner dots to adjust it.</div>
+    </>
+  );
+}
+
+function BlockPanel({ b, design, mods, patch, onDuplicate, onDelete, onPanelsTool, onShed }: { b: Block; design: Design; mods: ModuleSpec[]; patch: (p: Partial<Block>) => void; onDuplicate: () => void; onDelete: () => void; onPanelsTool: () => void; onShed: () => void }) {
+  const m = findModule(mods, b.moduleId), S = blockSlots(b, m, design), L = S.L, n = S.active.length;
+  const shed = b.shedId ? design.sheds.find((s) => s.id === b.shedId) : null;
+  const removed = S.ghost.length;
+  const turn = (d: number) => patch({ azimuth: Math.round((((b.azimuth + d) % 360) + 360) % 360 * 100) / 100 });
+  return (
+    <>
+      <Head name={b.name} onName={(name) => patch({ name })} onDuplicate={onDuplicate} onDelete={onDelete} />
+      {shed && <button className="ebtn block" style={{ marginTop: 6 }} onClick={onShed}>← Back to {shed.name} (outline, height, margin)</button>}
+      <div className="ed-sec"><div className="t">Summary</div>
+        <div className="kv"><span>Modules</span><b>{n}</b></div>
+        <div className="kv"><span>DC size</span><b>{fmt((n * m.watt) / 1000)} kWp</b></div>
+        <div className="kv"><span>Set size on plan</span><b>{fmt(L.width)} × {fmt(L.depth)} m</b></div>
+        {shed && b.rows * b.cols - S.usable > 0 && <div className="ewarn">{b.rows * b.cols - S.usable} of {b.rows * b.cols} places fall outside the shed outline, in its edge margin or in a no-panel area, and are left empty. Reduce rows or columns, or drag the set.</div>}
+      </div>
+      <div className="ed-sec"><div className="t">Panels</div>
+        <div className="ef wide"><select className="eselect" value={m.id} onChange={(e) => patch({ moduleId: e.target.value })}>{mods.map((x) => <option key={x.id} value={x.id}>{x.name} ({x.length} × {x.width} m)</option>)}</select></div>
+        {<div className="ef"><label>Rows</label><Num value={b.rows} min={1} max={200} int onCommit={(v) => patch({ rows: v })} /></div>}
+        {<div className="ef"><label>Columns</label><Num value={b.cols} min={1} max={400} int onCommit={(v) => patch({ cols: v })} /></div>}
+        <div className="ef"><label>Panel orientation</label>
+          <div className="eseg"><button className={b.orientation === 'portrait' ? 'on' : ''} onClick={() => patch({ orientation: 'portrait' })}>Portrait</button><button className={b.orientation === 'landscape' ? 'on' : ''} onClick={() => patch({ orientation: 'landscape' })}>Landscape</button></div>
+        </div>
+      </div>
+      <div className="ed-sec"><div className="t">Gaps</div>
+        <div className="ef"><label>Gap between columns<small>side by side</small></label><Num value={b.gapH} min={0} max={20} step={0.005} unit="m" onCommit={(v) => patch({ gapH: v })} /></div>
+        <div className="ef"><label>Gap between rows<small>{b.mounting === 'flush' ? 'along the roof slope' : 'clear gap on the ground'}</small></label><Num value={b.gapV} min={0} max={30} step={0.005} unit="m" onCommit={(v) => patch({ gapV: v })} /></div>
+        <div className="ef"><label>Walkway gap after every<small>rows (0 = none)</small></label><Num value={b.aisleRowsEvery} min={0} max={200} int onCommit={(v) => patch({ aisleRowsEvery: v })} /></div>
+        {b.aisleRowsEvery > 0 && <div className="ef"><label>Row walkway gap</label><Num value={b.aisleRowsGap} min={0} max={30} step={0.1} unit="m" onCommit={(v) => patch({ aisleRowsGap: v })} /></div>}
+        <div className="ef"><label>Walkway gap after every<small>columns (0 = none)</small></label><Num value={b.aisleColsEvery} min={0} max={400} int onCommit={(v) => patch({ aisleColsEvery: v })} /></div>
+        {b.aisleColsEvery > 0 && <div className="ef"><label>Column walkway gap</label><Num value={b.aisleColsGap} min={0} max={30} step={0.1} unit="m" onCommit={(v) => patch({ aisleColsGap: v })} /></div>}
+      </div>
+      {shed && (shed.tilt || 0) > 0 ? (
+        <div className="ed-sec"><div className="t">Mounting</div>
+          <div className="kv"><span>Tilt</span><b>{fmt(b.tilt, 1)}° (shed roof)</b></div>
+          <div className="kv"><span>Facing direction</span><b>{fmt(b.azimuth, 1)}°</b></div>
+          <div style={{ color: 'var(--ed-muted)', fontSize: 12 }}>These panels lie on the sloped roof of {shed.name}. Change the roof tilt or direction on the shed.</div>
+        </div>
+      ) : (
+      <div className="ed-sec"><div className="t">Mounting</div>
+        <div className="ef wide"><select className="eselect" value={b.mounting} onChange={(e) => patch({ mounting: e.target.value as any })}>
+          <option value="flush">On a shed / sloped roof (one flat plane)</option>
+          <option value="rows">Tilted rows (flat roof or ground)</option>
+        </select></div>
+        <div className="ef"><label>Tilt</label><Num value={b.tilt} min={0} max={60} step={1} unit="°" onCommit={(v) => patch({ tilt: v })} /></div>
+        <div className="ef"><label>Facing direction<small>180° = south</small></label><Num value={b.azimuth} min={0} max={360} step={0.5} unit="°" onCommit={(v) => patch({ azimuth: v % 360 })} /></div>
+        <div className="eseg" style={{ marginBottom: 7 }}>
+          <button onClick={() => turn(-1)}>↺ 1°</button>
+          {[['N', 0], ['E', 90], ['S', 180], ['W', 270]].map(([l, a]) => <button key={l} className={b.azimuth === a ? 'on' : ''} onClick={() => patch({ azimuth: a as number })}>{l}</button>)}
+          <button onClick={() => turn(1)}>1° ↻</button>
+        </div>
+        {shed && (
+          <div className="eseg" style={{ marginBottom: 7 }}>
+            <button onClick={() => patch({ azimuth: shedAzimuth(shed) })}>Line up with shed</button>
+            <button onClick={() => turn(90)}>Turn 90°</button>
+            <button onClick={() => turn(180)}>Flip</button>
+          </div>
+        )}
+        {!shed && <div className="ef"><label>Height above ground<small>lowest panel edge</small></label><Num value={b.mountHeight} min={0} max={80} step={0.1} unit="m" onCommit={(v) => patch({ mountHeight: v })} /></div>}
+      </div>
+      )}
+      {(
+        <div className="ed-sec"><div className="t">Position from the project pin</div>
+          <div className="ef"><label>East</label><Num value={b.x} min={-2000} max={2000} step={0.1} unit="m" onCommit={(v) => patch({ x: v })} /></div>
+          <div className="ef"><label>North</label><Num value={-b.z} min={-2000} max={2000} step={0.1} unit="m" onCommit={(v) => patch({ z: -v })} /></div>
+        </div>
+      )}
+      <div className="ed-sec"><div className="t">Single panels</div>
+        <div style={{ color: 'var(--ed-muted)', fontSize: 13, marginBottom: 8 }}>{removed > 0 ? `${removed} panel${removed > 1 ? 's' : ''} removed by hand.` : 'No panel has been removed by hand.'}</div>
+        <button className="ebtn block" onClick={onPanelsTool}>Add / remove panels by clicking</button>
+        {removed > 0 && <button className="ebtn block" style={{ marginTop: 6 }} onClick={() => patch({ removed: [] })}>Put all removed panels back</button>}
+      </div>
+    </>
+  );
+}
+
+function BoxPanel({ o, walkway, patch, onDuplicate, onDelete }: { o: Obstruction | Walkway; walkway: boolean; patch: (p: any) => void; onDuplicate: () => void; onDelete: () => void }) {
+  return (
+    <>
+      <Head name={o.name} onName={(name) => patch({ name })} onDuplicate={onDuplicate} onDelete={onDelete} />
+      <div className="ed-sec"><div className="t">{walkway ? 'Walkway size' : 'Obstruction size'}</div>
+        <div className="ef"><label>Width</label><Num value={o.w} min={0.1} max={500} step={0.1} unit="m" onCommit={(v) => patch({ w: v })} /></div>
+        <div className="ef"><label>Length</label><Num value={o.l} min={0.1} max={1000} step={0.1} unit="m" onCommit={(v) => patch({ l: v })} /></div>
+        <div className="ef"><label>{walkway ? 'Height above ground' : 'Height'}<small>{walkway ? 'set it to the roof level' : 'casts a shadow on the panels'}</small></label><Num value={o.h} min={0} max={150} step={0.1} unit="m" onCommit={(v) => patch({ h: v })} /></div>
+        <div className="ef"><label>Rotation<small>0° = length runs north–south</small></label><Num value={o.rotation} min={0} max={360} step={1} unit="°" onCommit={(v) => patch({ rotation: v % 360 })} /></div>
+      </div>
+      <div className="ed-sec"><div className="t">Position from the project pin</div>
+        <div className="ef"><label>East</label><Num value={o.x} min={-2000} max={2000} step={0.1} unit="m" onCommit={(v) => patch({ x: v })} /></div>
+        <div className="ef"><label>North</label><Num value={-o.z} min={-2000} max={2000} step={0.1} unit="m" onCommit={(v) => patch({ z: -v })} /></div>
+      </div>
+      {!walkway && <div className="ewarn">Use obstructions for water tanks, parapets, lift rooms or nearby buildings. Their shadows are included in “Calculate generation”.</div>}
+    </>
+  );
+}
