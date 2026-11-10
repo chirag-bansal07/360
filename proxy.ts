@@ -36,7 +36,7 @@ export async function proxy(req: NextRequest) {
     try {
       const s = verifySession(req.cookies.get(COOKIE)?.value);
       // the cookie must also carry the user's current session version (signing out raises it)
-      if (s) signedIn = (await sessionVersion(s.userId)) === s.version;
+      if (s) signedIn = (await sessionVersion(s.userId, pathname.startsWith('/api/tile/'))) === s.version;
     } catch {
       return deny('The server is not ready (session check failed). Try again shortly.', 503);
     }

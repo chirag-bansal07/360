@@ -44,9 +44,9 @@ export async function allow(key: string, max: number, windowSeconds: number): Pr
 
 // Session version of a user, remembered for a short time so pages and map tiles do not query on every request.
 const seen = new Map<string, { sv: number | null; at: number }>();
-export async function sessionVersion(userId: string): Promise<number | null> {
+export async function sessionVersion(userId: string, cached = false): Promise<number | null> {
   const hit = seen.get(userId);
-  if (hit && Date.now() - hit.at < 30000) return hit.sv;
+  if (cached && hit && Date.now() - hit.at < 10000) return hit.sv; // only map tiles use the short memory; everything else asks the database
   await ensureSchema();
   const rows = (await sql()`select sv from users where id = ${userId}`) as any[];
   const sv = rows.length ? (rows[0].sv as number) : null;
