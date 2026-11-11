@@ -6,9 +6,9 @@ import { sessionVersion } from '@/lib/pg';
 //  - On this computer: requests must be addressed to a local host name (stops DNS-rebinding from other sites).
 //  - Hosted: every page and API call needs a valid sign-in, except the sign-in page and its API.
 //  - Always: changes (POST / PUT / DELETE) must come from the app's own pages (stops other sites from changing data).
-// Extra local host names can be allowed with SUNMOUNT_HOSTS="name1,name2".
+// Extra local host names can be allowed with SUNCRAFT_HOSTS="name1,name2".
 const LOCAL = ['localhost', '127.0.0.1', '[::1]'];
-const extra = (process.env.SUNMOUNT_HOSTS || '').split(',').map((h) => h.trim().toLowerCase()).filter(Boolean);
+const extra = (process.env.SUNCRAFT_HOSTS || process.env.SUNMOUNT_HOSTS || '').split(',').map((h) => h.trim().toLowerCase()).filter(Boolean);
 const hostName = (h: string) => h.toLowerCase().replace(/:\d+$/, '');
 const deny = (msg: string, status = 403) => NextResponse.json({ error: msg }, { status });
 

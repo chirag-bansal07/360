@@ -51,7 +51,7 @@ export default function Viewer() {
     <div className="viewer">
       <div className="viewer-top">
         <Link className="btn sm" href={`/designs/${id}`}>← Design summary</Link>
-        <b>{settings?.company.name || 'Sunmount360'}</b>
+        <b>{settings?.company.name || 'SunCraft3D'}</b>
         <span className="grow" />
         <div className="seg"><button className={view === '2d' ? 'on' : ''} onClick={() => setView('2d')}>Top view</button><button className={view === '3d' ? 'on' : ''} onClick={() => setView('3d')}>3D</button></div>
         <button className="btn sm" onClick={() => scene.current?.engine()?.fit()}>Fit to layout</button>
@@ -108,7 +108,7 @@ export default function Viewer() {
           {!r && <div className="muted small">Calculate generation to see these maps.</div>}
           {r && stale && mode !== 'normal' && <div className="muted small">These colours are from the last calculation.</div>}
         </div>
-        <div className="vsec muted small">Design by {settings?.company.name || 'Sunmount360'}</div>
+        <div className="vsec muted small">Design by {settings?.company.name || 'SunCraft3D'}</div>
       </div>
     </div>
   );

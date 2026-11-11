@@ -1,10 +1,10 @@
-# Sunmount360
+# SunCraft3D
 
 Solar plant layout planner. Runs on this computer; all projects are saved in `data/db.json`.
 
 ## Start
 
-Double-click **Start Sunmount360.bat**, or run:
+Double-click **Start SunCraft3D.bat**, or run:
 
     npx next start -p 3600
 

@@ -22,7 +22,7 @@ export async function PUT(req: Request) {
   if (b.company) {
     const logo = String(b.company.logo || '');
     if (logo.length > 700000) return fail('The logo file is too large. Use an image under 500 KB.');
-    s.company = { name: String(b.company.name || '').trim() || 'Sunmount360', email: String(b.company.email || '').trim(), phone: String(b.company.phone || '').trim(), logo };
+    s.company = { name: String(b.company.name || '').trim() || 'SunCraft3D', email: String(b.company.email || '').trim(), phone: String(b.company.phone || '').trim(), logo };
   }
   if (Array.isArray(b.customModules)) {
     const mods = [];

@@ -33,10 +33,10 @@ export default function LoginPage() {
     <div className="login">
       <form onSubmit={submit} className="card login-card">
         <div className="card-body">
-          <div className="brand"><span className="brand-mark" /><span>Sunmount<small>360</small></span></div>
+          <div className="brand"><span className="brand-mark" /><span>SunCraft<small>3D</small></span></div>
           <h1>{mode === 'login' ? 'Sign in' : 'Create an account'}</h1>
           <p className="muted lead">
-            {mode === 'login' ? 'Use the email and password of your Sunmount360 account.' : 'You need the sign-up code from the owner of this app.'}
+            {mode === 'login' ? 'Use the email and password of your SunCraft3D account.' : 'You need the sign-up code from the owner of this app.'}
           </p>
           {error && <div className="error" style={{ marginBottom: 12 }}>{error}</div>}
           {mode === 'signup' && <div style={{ marginBottom: 10 }}><label className="small">Your name</label><input className="input" value={name} onChange={(e) => setName(e.target.value)} autoComplete="name" /></div>}

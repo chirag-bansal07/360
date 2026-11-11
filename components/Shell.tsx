@@ -16,7 +16,7 @@ export default function Shell({ children }: { children: ReactNode }) {
   return (
     <div className="shell">
       <aside className="side">
-        <Link href="/" className="brand"><span className="brand-mark" /><span>Sunmount<small>360</small></span></Link>
+        <Link href="/" className="brand"><span className="brand-mark" /><span>SunCraft<small>3D</small></span></Link>
         <nav className="nav">
           <Link href="/" className={on('/') ? 'on' : ''}><Icon d="M3 3h7v9H3zM14 3h7v5h-7zM14 12h7v9h-7zM3 16h7v5H3z" />Dashboard</Link>
           <Link href="/projects" className={on('/projects') || on('/designs') ? 'on' : ''}><Icon d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />Projects</Link>

@@ -16,7 +16,7 @@ export const DEFAULT_LOSSES: LossSettings = {
 };
 
 export const DEFAULT_SETTINGS: Settings = {
-  company: { name: 'Sunmount360', email: '', phone: '', logo: '' },
+  company: { name: 'SunCraft3D', email: '', phone: '', logo: '' },
   customModules: [],
   losses: DEFAULT_LOSSES,
   googleMapsKey: '',

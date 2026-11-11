@@ -21,6 +21,7 @@ function normalise(db: Db): Db {
     company: { ...DEFAULT_SETTINGS.company, ...db.settings?.company },
     losses: { ...DEFAULT_SETTINGS.losses, ...db.settings?.losses },
   };
+  if (db.settings.company.name === 'Sunmount360') db.settings.company.name = DEFAULT_SETTINGS.company.name; // the app's earlier name, saved as the default company name
   for (const pr of db.projects) for (const d of pr.designs) { d.sheds = d.sheds || []; d.keepouts = d.keepouts || []; }
   return db;
 }

@@ -11,6 +11,7 @@ export default function CreateProject({ onClose }: { onClose: () => void }) {
   const [pos, setPos] = useState<{ lat: number; lng: number } | null>(null);
   const [matches, setMatches] = useState<{ label: string; lat: number; lng: number }[]>([]);
   const [f, setF] = useState({ name: '', clientName: '', phone: '', email: '', address: '', displayAddress: '', type: 'commercial' });
+  const [matchNote, setMatchNote] = useState('');
   const [busy, setBusy] = useState('');
   const [err, setErr] = useState('');
   const set = (k: string, v: string) => setF((s) => ({ ...s, [k]: v }));
@@ -27,7 +28,7 @@ export default function CreateProject({ onClose }: { onClose: () => void }) {
   async function find() {
     const t = loc.trim();
     if (!t) { setErr('Paste a Google Maps link, coordinates, or type a place name.'); return; }
-    setErr(''); setMatches([]);
+    setErr(''); setMatches([]); setMatchNote('');
     const direct = parseLatLng(t);
     if (direct) return place(direct.lat, direct.lng);
     setBusy('find');
@@ -38,8 +39,9 @@ export default function CreateProject({ onClose }: { onClose: () => void }) {
       } else {
         const r = await api(`/api/geocode?q=${encodeURIComponent(t)}`);
         if (!r.results.length) setErr('No place found with that name. Try a nearby town, or paste a Google Maps link.');
-        else if (r.results.length === 1) await place(r.results[0].lat, r.results[0].lng, r.results[0].label);
-        else setMatches(r.results);
+        // only an exact match inside India is placed straight away; anything less sure is offered as a choice
+        else if (r.results.length === 1 && r.match === 'exact') await place(r.results[0].lat, r.results[0].lng, r.results[0].label);
+        else { setMatches(r.results); setMatchNote(r.match === 'near' ? 'The exact place is not on the map. These are the nearest areas found: pick one, then drag the pin onto the roof.' : r.match === 'abroad' ? 'Nothing in India has this name. These matches are in other countries: pick one only if that is really the site, or paste a Google Maps link instead.' : ''); }
       }
     } catch (e: any) { setErr(e.message); }
     setBusy('');
@@ -73,6 +75,7 @@ export default function CreateProject({ onClose }: { onClose: () => void }) {
                   <button className="btn dark" onClick={find} disabled={busy === 'find'}>{busy === 'find' ? 'Finding…' : 'Find'}</button>
                 </div>
               </div>
+              {matches.length > 0 && matchNote && <p className="muted small" style={{ margin: '0 0 6px' }}>{matchNote}</p>}
               {matches.length > 0 && (
                 <div className="results-list">{matches.map((m, i) => <button key={i} onClick={() => place(m.lat, m.lng, m.label)}>{m.label}</button>)}</div>
               )}

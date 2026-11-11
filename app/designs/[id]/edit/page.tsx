@@ -8,7 +8,7 @@ import Confirm from '@/components/Confirm';
 import { useDesign } from '@/lib/useDesign';
 import { api, fmt, fmt0, SHORT_MONTHS } from '@/lib/client';
 import { findModule, newBlock, uid } from '@/lib/catalog';
-import { blockLayout, blockSlots, blockYaw, designTotals, edgeLengths, pointInPoly, polyArea, polyCentre, polyPerimeter, ROOF_CLEARANCE, rad, shedAzimuth, shedRoofY, shedTopY, shedUnder, toWorld } from '@/lib/geometry';
+import { blockLayout, blockSlots, boxPlan, blockYaw, designTotals, edgeLengths, pointInPoly, polyArea, polyCentre, polyPerimeter, ROOF_CLEARANCE, rad, shedAzimuth, shedRoofY, shedTopY, shedUnder, toWorld } from '@/lib/geometry';
 import { clockToSolar, dayOfYear, sunVector } from '@/lib/sun';
 import type { Block, Design, Keepout, ModuleSpec, Obstruction, Pt, Shed, Walkway } from '@/lib/types';
 import type { DrawKind, Selection, Tool } from '@/lib/engine';
@@ -22,15 +22,15 @@ const MOVABLE = ['block', 'obstruction', 'walkway'];
 const NO_PICKS: Pick[] = [];
 type ArrangeOp = 'top' | 'bottom' | 'left' | 'right' | 'row' | 'column';
 
-// Footprint of a panel set, obstruction or walkway on the plan: centre, turn and half sizes.
-function footprint(d: Design, mods: ModuleSpec[], p: Pick): { p: Pick; name: string; x: number; z: number; yaw: number; hw: number; hd: number } | null {
+// Footprint of a panel set, obstruction or walkway on the plan: centre, turn and the four corners as drawn.
+function footprint(d: Design, mods: ModuleSpec[], p: Pick): { p: Pick; name: string; x: number; z: number; yaw: number; corners: Pt[] } | null {
   if (p.kind === 'block') {
     const b = d.blocks.find((q) => q.id === p.id); if (!b) return null;
-    const L = blockLayout(b, findModule(mods, b.moduleId));
-    return { p, name: b.name, x: b.x, z: b.z, yaw: blockYaw(b.azimuth), hw: L.width / 2, hd: L.depth / 2 };
+    const L = blockLayout(b, findModule(mods, b.moduleId)), yaw = blockYaw(b.azimuth), hw = L.width / 2, hd = L.depth / 2;
+    return { p, name: b.name, x: b.x, z: b.z, yaw, corners: [[-hw, -hd], [hw, -hd], [hw, hd], [-hw, hd]].map(([lx, lz]) => toWorld(b.x, b.z, yaw, lx, lz)) };
   }
   const o = (p.kind === 'obstruction' ? d.obstructions : p.kind === 'walkway' ? d.walkways : []).find((q) => q.id === p.id);
-  return o ? { p, name: o.name, x: o.x, z: o.z, yaw: -rad(o.rotation), hw: o.w / 2, hd: o.l / 2 } : null;
+  return o ? { p, name: o.name, x: o.x, z: o.z, yaw: -rad(o.rotation), corners: boxPlan(d, o) } : null; // on a sloped roof the item is tipped with it
 }
 
 // Lines up or spaces the picked items. Directions are those of the first picked item:
@@ -42,8 +42,7 @@ function arrange(d: Design, mods: ModuleSpec[], picks: Pick[], op: ArrangeOp, ga
   const U: Pt = [c, -s], V: Pt = [s, c];
   const ext = items.map((it) => {
     let u0 = Infinity, u1 = -Infinity, v0 = Infinity, v1 = -Infinity;
-    for (const [lx, lz] of [[-it.hw, -it.hd], [it.hw, -it.hd], [it.hw, it.hd], [-it.hw, it.hd]]) {
-      const [wx, wz] = toWorld(it.x, it.z, it.yaw, lx, lz);
+    for (const [wx, wz] of it.corners) {
       const u = wx * U[0] + wz * U[1], v = wx * V[0] + wz * V[1];
       u0 = Math.min(u0, u); u1 = Math.max(u1, u); v0 = Math.min(v0, v); v1 = Math.max(v1, v);
     }
@@ -271,7 +270,12 @@ export default function Editor() {
     const d = latest.current!; if (!sel) return;
     if (sel.kind === 'block') { const b = d.blocks.find((x) => x.id === sel.id); if (b) patchBlock(b.id, { x: r2(b.x + dx), z: r2(b.z + dz) }); }
     else if (sel.kind === 'obstruction' || sel.kind === 'walkway') { const kind = sel.kind === 'obstruction' ? 'obstructions' : 'walkways'; const o = (d[kind] as any[]).find((x) => x.id === sel.id); if (o) patchObj(kind, o.id, { x: r2(o.x + dx), z: r2(o.z + dz) }); }
-    else if (sel.kind === 'shed') { const s = d.sheds.find((x) => x.id === sel.id); if (s) apply({ ...d, sheds: d.sheds.map((q) => (q.id === s.id ? { ...q, points: q.points.map(([x, z]) => [r2(x + dx), r2(z + dz)] as Pt) } : q)), blocks: d.blocks.map((b) => (b.shedId === s.id ? { ...b, x: r2(b.x + dx), z: r2(b.z + dz) } : b)) }); }
+    else if (sel.kind === 'shed') {
+      // everything on the roof moves with the shed: its panel sets and the obstructions and walkways standing on it
+      const s = d.sheds.find((x) => x.id === sel.id);
+      const ride = <T extends { x: number; z: number }>(o: T) => (shedUnder(d, o.x, o.z)?.id === s?.id ? { ...o, x: r2(o.x + dx), z: r2(o.z + dz) } : o);
+      if (s) apply({ ...d, sheds: d.sheds.map((q) => (q.id === s.id ? { ...q, points: q.points.map(([x, z]) => [r2(x + dx), r2(z + dz)] as Pt) } : q)), blocks: d.blocks.map((b) => (b.shedId === s.id ? { ...b, x: r2(b.x + dx), z: r2(b.z + dz) } : b)), obstructions: d.obstructions.map(ride), walkways: d.walkways.map(ride) });
+    }
     else if (sel.kind === 'keepout') { const k = d.keepouts.find((x) => x.id === sel.id); if (k) patchKeepout(k.id, { points: k.points.map(([x, z]) => [r2(x + dx), r2(z + dz)] as Pt) }); }
   };
 

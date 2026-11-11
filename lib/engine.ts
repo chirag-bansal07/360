@@ -108,7 +108,7 @@ export class Engine {
   private raf = 0;
   private ro: ResizeObserver;
   private disposed = false;
-  private drag: null | { sel: NonNullable<Selection>; obj: THREE.Object3D; ox: number; oz: number; gx: number; gz: number; moved: boolean } = null;
+  private drag: null | { sel: NonNullable<Selection>; obj: THREE.Object3D; ox: number; oz: number; gx: number; gz: number; gy: number; moved: boolean } = null;
   private down: { x: number; y: number } | null = null;
   private handles: THREE.Mesh[] = [];
   private vdrag: null | { mesh: THREE.Mesh; y: number } = null;
@@ -340,13 +340,21 @@ export class Engine {
         geo.computeVertexNormals();
       }
       const roofY: Y = (x, z) => Math.max(shedRoofY(sh, x, z), 0.05) + 0.05;
-      const mesh = new THREE.Mesh(geo, new THREE.MeshLambertMaterial({ color: '#dfe6ee', transparent: true, opacity: 0.42, depthWrite: false }));
+      // the roof (and floor) stays see-through so the satellite picture shows in the plan; the walls are solid
+      const mesh = new THREE.Mesh(geo, [
+        new THREE.MeshLambertMaterial({ color: '#dfe6ee', transparent: true, opacity: 0.42, depthWrite: false }),
+        new THREE.MeshLambertMaterial({ color: '#c5ced7' }), // outer faces only: seen through the roof, the inside of the far walls would make the shed look like an open box
+      ]);
       mesh.castShadow = true;
       mesh.userData.sel = { kind: 'shed', id: sh.id };
       mesh.userData.locked = true;
       const line = loop(sh.points, roofY, '#ffffff');
       this.outlines.push({ line, kind: 'shed', id: sh.id });
-      this.content.add(mesh, line); this.pickables.push(mesh);
+      // a line up every corner, so the plain walls read as separate faces
+      const corners = new THREE.LineSegments(
+        new THREE.BufferGeometry().setFromPoints(sh.points.flatMap(([x, z]) => [new THREE.Vector3(x, 0, z), new THREE.Vector3(x, roofY(x, z) - 0.05, z)])),
+        new THREE.LineBasicMaterial({ color: '#86909b' }));
+      this.content.add(mesh, line, corners); this.pickables.push(mesh);
       addHandles('shed', sh.id, sh.points, roofY);
     }
     for (const k of d.keepouts || []) {
@@ -377,8 +385,9 @@ export class Engine {
       const turn = new THREE.Quaternion().setFromAxisAngle(up, -rad(o.rotation));
       if (roof) {
         const n = new THREE.Vector3(...shedNormal(roof));
-        const lift = isWalk ? 0.2 : o.h / 2; // a walkway lies just above the panels, an obstruction stands on the roof
-        mesh.position.set(o.x, base, o.z).addScaledVector(n, lift);
+        // a walkway lies just above the panels, straight over its place on the plan; an obstruction stands on the roof with its foot at that place
+        if (isWalk) mesh.position.set(o.x, base + 0.2, o.z);
+        else mesh.position.set(o.x, base, o.z).addScaledVector(n, o.h / 2);
         mesh.quaternion.copy(new THREE.Quaternion().setFromUnitVectors(up, n).multiply(turn));
       } else {
         mesh.position.set(o.x, isWalk ? o.h + 0.03 : o.h / 2, o.z);
@@ -532,10 +541,11 @@ export class Engine {
     const flat = (h: THREE.Intersection) => { const k = h.object.userData.sel?.kind; return k === 'shed' || k === 'keepout'; };
     return hits.find((h) => !flat(h)) || hits[0] || null;
   }
-  private groundPoint(e: PointerEvent) {
+  // Point under the pointer on the level plane at height y (0 = the ground).
+  private groundPoint(e: PointerEvent, y = 0) {
     this.ray.setFromCamera(this.ndc(e), this.camera);
     const p = new THREE.Vector3();
-    return this.ray.ray.intersectPlane(new THREE.Plane(new THREE.Vector3(0, 1, 0), 0), p) ? p : null;
+    return this.ray.ray.intersectPlane(new THREE.Plane(new THREE.Vector3(0, 1, 0), -y), p) ? p : null;
   }
   private rootOf(o: THREE.Object3D) {
     let r = o;
@@ -618,11 +628,13 @@ export class Engine {
     const sel = hit?.object.userData.sel as NonNullable<Selection> | undefined;
     if (hit && sel) {
       const add = e.ctrlKey || e.metaKey || e.shiftKey;
-      const gp = hit.object.userData.locked || add ? null : this.groundPoint(e); // Ctrl+click only selects, it never drags
+      // the drag is measured at the height where the item was grabbed, so on a roof it stays under the pointer in 3D too
+      const gy = Math.max(hit.point.y, 0);
+      const gp = hit.object.userData.locked || add ? null : this.groundPoint(e, gy); // Ctrl+click only selects, it never drags
       const obj = this.rootOf(hit.object);
       if (add) { this.controls.enabled = false; setTimeout(() => { if (!this.drag && !this.vdrag) this.controls.enabled = true; }, 0); }
       if (gp) {
-        this.drag = { sel, obj, ox: obj.position.x, oz: obj.position.z, gx: gp.x, gz: gp.z, moved: false };
+        this.drag = { sel, obj, ox: obj.position.x, oz: obj.position.z, gx: gp.x, gz: gp.z, gy, moved: false };
         this.controls.enabled = false;
         this.renderer.domElement.setPointerCapture(e.pointerId);
       }
@@ -649,7 +661,7 @@ export class Engine {
     }
     if (this.drag) {
       if (!this.drag.moved && this.down && Math.hypot(e.clientX - this.down.x, e.clientY - this.down.y) < 4) return;
-      const gp = this.groundPoint(e);
+      const gp = this.groundPoint(e, this.drag.gy);
       if (!gp) return;
       this.drag.moved = true;
       this.drag.obj.position.x = this.drag.ox + gp.x - this.drag.gx;

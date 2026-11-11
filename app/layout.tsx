@@ -1,7 +1,7 @@
 import './globals.css';
 import type { ReactNode } from 'react';
 
-export const metadata = { title: 'Sunmount360', description: 'Solar plant layout planner' };
+export const metadata = { title: 'SunCraft3D', description: 'Solar plant layout planner' };
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (

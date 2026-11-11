@@ -138,7 +138,18 @@ export function tipToRoof(shed: Shed, a: [number, number, number]): [number, num
   const cx = -uz * a[1], cy = uz * a[0] - ux * a[2], cz = ux * a[1]; // axis x a
   return [a[0] * c + cx * s + ux * dot * (1 - c), a[1] * c + cy * s, a[2] * c + cz * s + uz * dot * (1 - c)];
 }
-export const shedTopY = (shed: Shed) => shed.points.reduce((h, [x, z]) => Math.max(h, shedRoofY(shed, x, z)), shed.height);
+// Corners of an obstruction or walkway as seen on the plan. On a sloped roof the item is tipped with the roof,
+// so it covers a little less of the plan than its own width and length.
+export function boxPlan(d: { sheds?: Shed[] }, o: { x: number; z: number; w: number; l: number; rotation: number }): Pt[] {
+  const yaw = -rad(o.rotation), roof = shedUnder(d, o.x, o.z);
+  return [[-1, -1], [1, -1], [1, 1], [-1, 1]].map(([sx, sz]) => {
+    const [dx, dz] = toWorld(0, 0, yaw, (sx * o.w) / 2, (sz * o.l) / 2);
+    if (!roof) return [o.x + dx, o.z + dz] as Pt;
+    const v = tipToRoof(roof, [dx, 0, dz]);
+    return [o.x + v[0], o.z + v[2]] as Pt;
+  });
+}
+export const shedTopY =(shed: Shed) => shed.points.reduce((h, [x, z]) => Math.max(h, shedRoofY(shed, x, z)), shed.height);
 
 // Rows, columns and centre that fill the shed (inside its edge margin) for the block's current settings.
 export function fitBlock(b: Block, shed: Shed, m: ModuleSpec): Pick<Block, 'rows' | 'cols' | 'x' | 'z' | 'mountHeight'> {
