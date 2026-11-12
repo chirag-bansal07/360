@@ -15,11 +15,14 @@ export default function LocationPicker({ lat, lng, address, onChange }: { lat: n
 
   useEffect(() => {
     let dead = false;
-    import('leaflet').then((mod) => {
+    // Google satellite tiles when the app has a Google key, otherwise the free Esri ones
+    const source = fetch('/api/imagery/source').then((r) => (r.ok ? r.json() : null)).then((j) => !!j?.google).catch(() => false);
+    Promise.all([import('leaflet'), source]).then(([mod, google]) => {
       const L: any = (mod as any).default || mod;
       if (dead || !host.current || map.current) return;
       const m = L.map(host.current, { zoomControl: true, attributionControl: true }).setView([lat ?? 22.5, lng ?? 79], lat == null ? 4 : 18);
-      L.tileLayer('/api/tile/{z}/{x}/{y}', { maxNativeZoom: 18, maxZoom: 21, attribution: 'Imagery © Esri, Maxar' }).addTo(m);
+      if (google) L.tileLayer('/api/tile/{z}/{x}/{y}?p=google', { maxNativeZoom: 20, maxZoom: 22, attribution: 'Imagery © Google' }).addTo(m);
+      else L.tileLayer('/api/tile/{z}/{x}/{y}', { maxNativeZoom: 18, maxZoom: 21, attribution: 'Imagery © Esri, Maxar' }).addTo(m);
       const icon = L.divIcon({ className: '', html: '<div class="pin"></div>', iconSize: [22, 22], iconAnchor: [11, 22] });
       const mk = L.marker([lat ?? 22.5, lng ?? 79], { draggable: true, icon, opacity: lat == null ? 0 : 1 }).addTo(m);
       mk.on('dragend', () => { const p = mk.getLatLng(); cb.current(p.lat, p.lng); });
