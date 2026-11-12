@@ -14,6 +14,7 @@ export type Tool = 'select' | 'panels';
 export type EngineEvents = {
   onSelect?: (s: Selection, add?: boolean) => void; // add = Ctrl / Cmd / Shift was held
   onMove?: (s: NonNullable<Selection>, x: number, z: number) => void;
+  canMove?: (s: NonNullable<Selection>, x: number, z: number) => boolean; // asked during a drag: false = the item may not stand there
   onTogglePanel?: (blockId: string, key: string, action: 'remove' | 'add') => void;
   onHover?: (h: { action: 'remove' | 'add'; x: number; y: number } | null) => void;
   onAzimuth?: (deg: number) => void;
@@ -108,7 +109,7 @@ export class Engine {
   private raf = 0;
   private ro: ResizeObserver;
   private disposed = false;
-  private drag: null | { sel: NonNullable<Selection>; obj: THREE.Object3D; ox: number; oz: number; gx: number; gz: number; gy: number; moved: boolean } = null;
+  private drag: null | { sel: NonNullable<Selection>; obj: THREE.Object3D; ox: number; oz: number; gx: number; gz: number; gy: number; moved: boolean; placed: boolean } = null;
   private down: { x: number; y: number } | null = null;
   private handles: THREE.Mesh[] = [];
   private vdrag: null | { mesh: THREE.Mesh; y: number } = null;
@@ -645,7 +646,7 @@ export class Engine {
       const obj = this.rootOf(hit.object);
       if (add) { this.controls.enabled = false; setTimeout(() => { if (!this.drag && !this.vdrag) this.controls.enabled = true; }, 0); }
       if (gp) {
-        this.drag = { sel, obj, ox: obj.position.x, oz: obj.position.z, gx: gp.x, gz: gp.z, gy, moved: false };
+        this.drag = { sel, obj, ox: obj.position.x, oz: obj.position.z, gx: gp.x, gz: gp.z, gy, moved: false, placed: false };
         this.controls.enabled = false;
         this.renderer.domElement.setPointerCapture(e.pointerId);
       }
@@ -675,10 +676,13 @@ export class Engine {
       const gp = this.groundPoint(e, this.drag.gy);
       if (!gp) return;
       this.drag.moved = true;
-      this.drag.obj.position.x = this.drag.ox + gp.x - this.drag.gx;
-      this.drag.obj.position.z = this.drag.oz + gp.z - this.drag.gz;
       this.renderer.domElement.style.cursor = 'grabbing';
-      this.dirty = true;
+      const dr = this.drag, o = dr.obj.position, r = (v: number) => Math.round(v * 100) / 100;
+      const nx = r(dr.ox + gp.x - dr.gx), nz = r(dr.oz + gp.z - dr.gz);
+      const ok = (x: number, z: number) => !this.events.canMove || this.events.canMove(dr.sel, x, z);
+      // a place the item may not stand on is skipped; it slides along the limit where it can
+      const to = ok(nx, nz) ? [nx, nz] : nx !== o.x && ok(nx, o.z) ? [nx, o.z] : nz !== o.z && ok(o.x, nz) ? [o.x, nz] : null;
+      if (to) { o.x = to[0]; o.z = to[1]; dr.placed = true; this.dirty = true; }
       return;
     }
     if (e.buttons) return;
@@ -720,7 +724,7 @@ export class Engine {
       this.drag = null;
       this.controls.enabled = true;
       this.renderer.domElement.style.cursor = 'grab';
-      if (d.moved) this.events.onMove?.(d.sel, Math.round(d.obj.position.x * 100) / 100, Math.round(d.obj.position.z * 100) / 100);
+      if (d.moved && d.placed) this.events.onMove?.(d.sel, Math.round(d.obj.position.x * 100) / 100, Math.round(d.obj.position.z * 100) / 100);
       return;
     }
     if (!click || e.button !== 0) return;

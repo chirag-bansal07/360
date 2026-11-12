@@ -31,6 +31,7 @@ const SceneView = forwardRef<SceneHandle, Props>(function SceneView(p, ref) {
         const e = new Engine(host.current, { lat: p.lat, lng: p.lng, interactive: p.interactive, plain: p.plain }, {
           onSelect: (s, add) => events.current.onSelect?.(s, add),
           onMove: (s, x, z) => events.current.onMove?.(s, x, z),
+          canMove: (s, x, z) => events.current.canMove?.(s, x, z) ?? true,
           onTogglePanel: (b, k, a) => events.current.onTogglePanel?.(b, k, a),
           onHover: (h) => setHover(h),
           onAzimuth: (d) => setAz(d),

@@ -9,6 +9,7 @@ import { useDesign } from '@/lib/useDesign';
 import { api, fmt, fmt0, SHORT_MONTHS } from '@/lib/client';
 import { findModule, findStructure, newBlock, STRUCTURE_BRAND, STRUCTURES, structureOf, uid } from '@/lib/catalog';
 import { blockLayout, blockSlots, boxPlan, blockYaw, designTotals, edgeLengths, pointInPoly, polyArea, polyCentre, polyPerimeter, ROOF_CLEARANCE, rad, shedAzimuth, shedRoofY, shedTopY, shedUnder, toWorld } from '@/lib/geometry';
+import { footprint, freeSpot, moveError, overlapError, shedError, type Foot } from '@/lib/placement';
 import { clockToSolar, dayOfYear, sunVector } from '@/lib/sun';
 import type { Block, Design, Keepout, ModuleSpec, Obstruction, Pt, Shed, StructureId, Walkway } from '@/lib/types';
 import type { DrawKind, Selection, Tool } from '@/lib/engine';
@@ -22,21 +23,10 @@ const MOVABLE = ['block', 'obstruction', 'walkway'];
 const NO_PICKS: Pick[] = [];
 type ArrangeOp = 'top' | 'bottom' | 'left' | 'right' | 'row' | 'column';
 
-// Footprint of a panel set, obstruction or walkway on the plan: centre, turn and the four corners as drawn.
-function footprint(d: Design, mods: ModuleSpec[], p: Pick): { p: Pick; name: string; x: number; z: number; yaw: number; corners: Pt[] } | null {
-  if (p.kind === 'block') {
-    const b = d.blocks.find((q) => q.id === p.id); if (!b) return null;
-    const L = blockLayout(b, findModule(mods, b.moduleId)), yaw = blockYaw(b.azimuth), hw = L.width / 2, hd = L.depth / 2;
-    return { p, name: b.name, x: b.x, z: b.z, yaw, corners: [[-hw, -hd], [hw, -hd], [hw, hd], [-hw, hd]].map(([lx, lz]) => toWorld(b.x, b.z, yaw, lx, lz)) };
-  }
-  const o = (p.kind === 'obstruction' ? d.obstructions : p.kind === 'walkway' ? d.walkways : []).find((q) => q.id === p.id);
-  return o ? { p, name: o.name, x: o.x, z: o.z, yaw: -rad(o.rotation), corners: boxPlan(d, o) } : null; // on a sloped roof the item is tipped with it
-}
-
-// Lines up or spaces the picked items. Directions are those of the first picked item:
+// Lines up or spaces the picked items. The first picked item is the reference: it never moves, and directions are its own:
 // "across" runs along its rows (left to right), "top to bottom" runs from its back edge to its front edge.
 function arrange(d: Design, mods: ModuleSpec[], picks: Pick[], op: ArrangeOp, gap: number): { design?: Design; error?: string } {
-  const items = picks.map((p) => footprint(d, mods, p)).filter(Boolean) as NonNullable<ReturnType<typeof footprint>>[];
+  const items = picks.map((p) => footprint(d, mods, p)).filter(Boolean) as Foot<Pick>[];
   if (items.length < 2) return { error: 'Select at least two items first (Ctrl + click).' };
   const c = Math.cos(items[0].yaw), s = Math.sin(items[0].yaw);
   const U: Pt = [c, -s], V: Pt = [s, c];
@@ -54,25 +44,22 @@ function arrange(d: Design, mods: ModuleSpec[], picks: Pick[], op: ArrangeOp, ga
   else if (op === 'left') items.forEach((_, i) => { du[i] = ext[0].u0 - ext[i].u0; });
   else if (op === 'right') items.forEach((_, i) => { du[i] = ext[0].u1 - ext[i].u1; });
   else {
-    // keep the order they are in now; the first in that order stays where it is
-    const row = op === 'row';
-    const order = items.map((_, i) => i).sort((a, b) => (row ? ext[a].u0 + ext[a].u1 - ext[b].u0 - ext[b].u1 : ext[a].v0 + ext[a].v1 - ext[b].v0 - ext[b].v1));
-    let edge = row ? ext[order[0]].u1 : ext[order[0]].v1;
-    for (const i of order.slice(1)) {
-      const move = edge + gap - (row ? ext[i].u0 : ext[i].v0);
-      if (row) du[i] = move; else dv[i] = move;
-      edge = (row ? ext[i].u1 : ext[i].v1) + move;
-    }
+    // the others line up on either side of the first item, in the order they are in now
+    const row = op === 'row', lo = (i: number) => (row ? ext[i].u0 : ext[i].v0), hi = (i: number) => (row ? ext[i].u1 : ext[i].v1), mid = (i: number) => lo(i) + hi(i);
+    const rest = items.map((_, i) => i).slice(1), set = (i: number, m: number) => { if (row) du[i] = m; else dv[i] = m; };
+    let edge = hi(0);
+    for (const i of rest.filter((q) => mid(q) >= mid(0)).sort((a, b) => mid(a) - mid(b))) { const m = edge + gap - lo(i); set(i, m); edge = hi(i) + m; }
+    edge = lo(0);
+    for (const i of rest.filter((q) => mid(q) < mid(0)).sort((a, b) => mid(b) - mid(a))) { const m = edge - gap - hi(i); set(i, m); edge = lo(i) + m; }
   }
   const at = new Map<string, { x: number; z: number }>();
   items.forEach((it, i) => at.set(it.p.kind + it.p.id, { x: r3(it.x + du[i] * U[0] + dv[i] * V[0]), z: r3(it.z + du[i] * U[1] + dv[i] * V[1]) }));
-  for (const it of items) {
-    if (it.p.kind !== 'block') continue;
-    const b = d.blocks.find((q) => q.id === it.p.id)!, shed = b.shedId ? d.sheds.find((q) => q.id === b.shedId) : null, n = at.get('block' + b.id)!;
-    if (shed && !pointInPoly(n.x, n.z, shed.points)) return { error: `That would move “${b.name}” off ${shed.name}. Use a smaller gap or move the first set.` };
-  }
   const put = <T extends { id: string; x: number; z: number }>(kind: string, list: T[]) => list.map((o) => { const n = at.get(kind + o.id); return n ? { ...o, ...n } : o; });
-  return { design: { ...d, blocks: put('block', d.blocks), obstructions: put('obstruction', d.obstructions), walkways: put('walkway', d.walkways) } };
+  const next = { ...d, blocks: put('block', d.blocks), obstructions: put('obstruction', d.obstructions), walkways: put('walkway', d.walkways) };
+  // nothing is moved when any item would leave its shed or land on another item
+  const err = moveError(d, next, mods, items.slice(1).map((it) => it.p));
+  if (err) return { error: `No space for that. ${err} Nothing was moved: use a smaller gap, or move “${items[0].name}” (the first item selected) to make room.` };
+  return { design: next };
 }
 
 // Panel sets on a shed sit on its roof. Rows, columns and position are set by the user.
@@ -172,13 +159,15 @@ export default function Editor() {
       return nb;
     }) };
     const b = next.blocks.find((x) => x.id === bid);
-    const shed = b?.shedId ? d.sheds.find((q) => q.id === b.shedId) : null;
-    if (b && shed && ('x' in p || 'z' in p) && !pointInPoly(b.x, b.z, shed.points)) {
-      apply({ ...d }, false); // redraw at the old place
-      setNotice(`Keep the panel set on ${shed.name}. Its centre must stay inside the shed outline.`);
+    const fitted = b?.shedId ? refit(next, mods, b.shedId) : next, me = [{ kind: 'block', id: bid }];
+    // a move must keep the set on its shed and clear of everything else; a change of size must not start an overlap
+    const err = 'x' in p || 'z' in p ? moveError(d, fitted, mods, me) : overlapError(d, mods, me) ? null : overlapError(fitted, mods, me);
+    if (err) {
+      apply({ ...d }, false); // redraw as it was
+      setNotice(`${err} Nothing was changed.`);
       return;
     }
-    apply(b?.shedId ? refit(next, mods, b.shedId) : next);
+    apply(fitted);
   };
   const patchShed = (sid: string, p: Partial<Shed>) => {
     const d = latest.current!;
@@ -190,8 +179,20 @@ export default function Editor() {
   };
   const patchObj = (kind: 'obstructions' | 'walkways', oid: string, p: any) => {
     const d = latest.current!;
-    apply({ ...d, [kind]: (d[kind] as any[]).map((o) => (o.id === oid ? { ...o, ...p } : o)) } as Design);
+    const next = { ...d, [kind]: (d[kind] as any[]).map((o) => (o.id === oid ? { ...o, ...p } : o)) } as Design;
+    const me = [{ kind: kind === 'obstructions' ? 'obstruction' : 'walkway', id: oid }];
+    const err = 'x' in p || 'z' in p ? overlapError(next, mods, me) : ['w', 'l', 'rotation'].some((k) => k in p) && !overlapError(d, mods, me) ? overlapError(next, mods, me) : null;
+    if (err) { apply({ ...d }, false); setNotice(`${err} Nothing was changed.`); return; }
+    apply(next);
   };
+  // a new item starts at the nearest clear place; when there is none it starts where asked and the user is told
+  const settle = (d: Design, p: Pick): { design: Design; crowded: boolean } => {
+    const at = freeSpot(d, mods, p);
+    if (!at) return { design: d, crowded: true };
+    const put = <T extends { id: string }>(l: T[]) => l.map((o) => (o.id === p.id ? { ...o, ...at } : o));
+    return { design: p.kind === 'block' ? { ...d, blocks: put(d.blocks) } : p.kind === 'obstruction' ? { ...d, obstructions: put(d.obstructions) } : { ...d, walkways: put(d.walkways) }, crowded: false };
+  };
+  const CROWDED = 'There is no clear space for it nearby, so it lies over another item. Make it smaller or drag it to a clear place.';
   const centre = () => scene.current?.engine()?.viewCentre() || { x: 0, z: 0 };
 
   const startDraw = (kind: DrawKind) => { setTool('select'); setSel(null); setNotice(''); setDraw(kind); };
@@ -212,9 +213,10 @@ export default function Editor() {
     const b: Block = { ...nb, name: `${shed.name} · set ${n}`, shedId: shed.id,
       azimuth: nb.ownTilt && sloped ? ((shed.slopeAz ?? 180) + 180) % 360 : shedAzimuth(shed), // reverse tilt faces away from the roof slope
       x: r2(inside ? cx : shed.points[0][0]), z: r2(inside ? cz : shed.points[0][1]), mountHeight: r2(shed.height + ROOF_CLEARANCE) };
-    apply(refit({ ...d, blocks: [...d.blocks, b] }, mods, shed.id));
+    const placed = settle(refit({ ...d, blocks: [...d.blocks, b] }, mods, shed.id), { kind: 'block', id: b.id });
+    apply(refit(placed.design, mods, shed.id));
     setSel({ kind: 'block', id: b.id }); setTool('select');
-    setNotice(`Panel set added: ${b.rows} rows × ${b.cols} columns. Set rows, columns and gaps on the right, and drag it into place.`);
+    setNotice(placed.crowded ? CROWDED : `Panel set added: ${b.rows} rows × ${b.cols} columns. Set rows, columns and gaps on the right, and drag it into place.`);
   };
   const clearPanels = (shedId: string) => {
     const d = latest.current!;
@@ -231,7 +233,9 @@ export default function Editor() {
     const at = on ? polyCentre(on.points) : [c.x, c.z];
     const o: Obstruction = { id: uid(), name: `Obstruction ${d.obstructions.length + 1}`, x: r2(at[0]), z: r2(at[1]), w: 2, l: 2, h: on ? 1 : 2, rotation: on ? (shedAzimuth(on) + 90) % 180 : 0 };
     if (on) setNotice(`Obstruction placed on the roof of ${on.name}. Drag it into place; it stands on the roof and follows its tilt.`);
-    apply({ ...d, obstructions: [...d.obstructions, o] }); setSel({ kind: 'obstruction', id: o.id }); setTool('select');
+    const placed = settle({ ...d, obstructions: [...d.obstructions, o] }, { kind: 'obstruction', id: o.id });
+    if (placed.crowded) setNotice(CROWDED);
+    apply(placed.design); setSel({ kind: 'obstruction', id: o.id }); setTool('select');
   };
   const addWalkway = () => {
     const d = latest.current!; const c = centre();
@@ -241,7 +245,9 @@ export default function Editor() {
     const at = on ? polyCentre(on.points) : [c.x, c.z];
     const w: Walkway = { id: uid(), name: `Walkway ${d.walkways.length + 1}`, x: r2(at[0]), z: r2(at[1]), w: 0.31, l: 3.66, h: 1, rotation: on ? (shedAzimuth(on) + 90) % 180 : 90 };
     if (on) setNotice(`Walkway placed on the roof of ${on.name}. Drag it into place; it follows the roof tilt.`);
-    apply({ ...d, walkways: [...d.walkways, w] }); setSel({ kind: 'walkway', id: w.id }); setTool('select');
+    const placed = settle({ ...d, walkways: [...d.walkways, w] }, { kind: 'walkway', id: w.id });
+    if (placed.crowded) setNotice(CROWDED);
+    apply(placed.design); setSel({ kind: 'walkway', id: w.id }); setTool('select');
   };
   const canDuplicate = !!sel && (sel.kind === 'obstruction' || sel.kind === 'walkway' || sel.kind === 'block');
   const duplicate = () => {
@@ -250,15 +256,19 @@ export default function Editor() {
       const b = d.blocks.find((x) => x.id === sel.id); if (!b) return;
       const L = blockSlots(b, findModule(mods, b.moduleId), d).L;
       const sh = b.shedId ? d.sheds.find((q) => q.id === b.shedId) : null;
-      const off = sh ? 0 : L.width + 1; // a copy on a shed starts on top of the original, ready to drag
+      const off = sh ? 0 : L.width + 1; // a copy on a shed starts at the nearest clear place on the roof
       const nb = { ...b, id: uid(), name: sh ? `${sh.name} · set ${d.blocks.filter((q) => q.shedId === sh.id).length + 1}` : `Block ${d.blocks.length + 1}`, removed: [...b.removed], x: r2(b.x + off) };
-      apply({ ...d, blocks: [...d.blocks, nb] }); setSel({ kind: 'block', id: nb.id });
+      const placed = settle({ ...d, blocks: [...d.blocks, nb] }, { kind: 'block', id: nb.id });
+      if (placed.crowded) setNotice(CROWDED);
+      apply(refit(placed.design, mods)); setSel({ kind: 'block', id: nb.id });
     } else {
       const kind = sel.kind === 'obstruction' ? 'obstructions' : 'walkways';
       const o = (d[kind] as any[]).find((x) => x.id === sel.id); if (!o) return;
       // a walkway copy continues the run: end to end with the original, the short (width) edges touching
-      const c = boxPlan(d, o), no = sel.kind === 'walkway' ? { ...o, id: uid(), name: `Walkway ${d.walkways.length + 1}`, x: r2(o.x + c[3][0] - c[0][0]), z: r2(o.z + c[3][1] - c[0][1]) } : { ...o, id: uid(), x: r2(o.x + o.w + 1) };
-      apply({ ...d, [kind]: [...(d[kind] as any[]), no] } as Design); setSel({ kind: sel.kind, id: no.id });
+      const c = boxPlan(d, o), no = sel.kind === 'walkway' ? { ...o, id: uid(), name: `Walkway ${d.walkways.length + 1}`, x: r3(o.x + c[3][0] - c[0][0]), z: r3(o.z + c[3][1] - c[0][1]) } : { ...o, id: uid(), x: r2(o.x + o.w + 1) };
+      const placed = settle({ ...d, [kind]: [...(d[kind] as any[]), no] } as Design, { kind: sel.kind, id: no.id });
+      if (placed.crowded) setNotice(CROWDED);
+      apply(placed.design); setSel({ kind: sel.kind, id: no.id });
     }
   };
   const removeSelected = () => {
@@ -298,6 +308,17 @@ export default function Editor() {
     },
     onMove: (s: NonNullable<Selection>, x: number, z: number) => {
       if (s.kind === 'block') patchBlock(s.id, { x, z }); else if (s.kind === 'obstruction' || s.kind === 'walkway') patchObj(s.kind === 'obstruction' ? 'obstructions' : 'walkways', s.id, { x, z });
+    },
+    // asked while dragging: an item does not follow the pointer off its shed or onto another item
+    canMove: (s: NonNullable<Selection>, x: number, z: number) => {
+      const d = latest.current!;
+      if (!MOVABLE.includes(s.kind)) return true;
+      const put = <T extends { id: string }>(l: T[]) => l.map((o) => (o.id === s.id ? { ...o, x, z } : o));
+      const after = s.kind === 'block' ? { ...d, blocks: put(d.blocks) } : s.kind === 'obstruction' ? { ...d, obstructions: put(d.obstructions) } : { ...d, walkways: put(d.walkways) };
+      // an item that already lies over another may be dragged freely to get it clear; where it is dropped is still checked
+      const err = shedError(d, after, mods, [s]) || (overlapError(d, mods, [s]) ? null : overlapError(after, mods, [s]));
+      if (err) setNotice(err);
+      return !err;
     },
     onTogglePanel: (bid: string, key: string, action: 'remove' | 'add') => {
       const b = latest.current!.blocks.find((x) => x.id === bid); if (!b) return;
@@ -373,7 +394,7 @@ export default function Editor() {
   const shed = sel?.kind === 'shed' ? design.sheds.find((s) => s.id === sel.id) : null;
   const keep = sel?.kind === 'keepout' ? design.keepouts.find((k) => k.id === sel.id) : null;
   const picked = block || obst || walk || shed || keep;
-  const many = !sel && multi.length >= 2 ? multi.map((p) => footprint(design, mods, p)).filter(Boolean) as NonNullable<ReturnType<typeof footprint>>[] : [];
+  const many = !sel && multi.length >= 2 ? multi.map((p) => footprint(design, mods, p)).filter(Boolean) as Foot<Pick>[] : [];
   const group = many.length >= 2;
   const doArrange = (op: ArrangeOp) => {
     const r = arrange(latest.current!, mods, many.map((m) => m.p), op, gap);
@@ -479,7 +500,7 @@ export default function Editor() {
               <div className="ef"><label>Gap between them<small>0 = touching</small></label><Num value={gap} min={0} max={100} step={0.05} unit="m" onCommit={(v) => setGap(v)} /></div>
               <button className="ebtn primary block" onClick={() => doArrange('row')}>Place side by side with this gap</button>
               <button className="ebtn block" style={{ marginTop: 6 }} onClick={() => doArrange('column')}>Place one behind the other with this gap</button>
-              <div style={{ color: 'var(--ed-muted)', fontSize: 12, marginTop: 6 }}>The items keep their current order. Use “Top” or “Left” first if they should also share an edge.</div>
+              <div style={{ color: 'var(--ed-muted)', fontSize: 12, marginTop: 6 }}>The first item selected stays where it is; the others line up on either side of it in their current order. Nothing is moved if an item would leave its shed or land on another item.</div>
             </div>
             <div className="row" style={{ gap: 6 }}>
               <button className="ebtn grow" style={{ justifyContent: 'center' }} onClick={() => setMulti([])}>Clear selection</button>
