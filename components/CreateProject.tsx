@@ -99,7 +99,7 @@ export default function CreateProject({ onClose }: { onClose: () => void }) {
               </div>
             </div>
             <div>
-              <LocationPicker lat={pos?.lat ?? null} lng={pos?.lng ?? null} onChange={(a, b) => place(a, b)} />
+              <LocationPicker lat={pos?.lat ?? null} lng={pos?.lng ?? null} address={pos ? f.address : ''} onChange={(a, b) => place(a, b)} />
               <p className="muted small" style={{ marginTop: 8 }}>
                 {pos ? <>Pin at <b>{pos.lat.toFixed(6)}, {pos.lng.toFixed(6)}</b>. Drag the pin or click the map to put it exactly on the roof.</> : 'Find a location, or zoom in and click the map to drop the pin on the roof.'}
               </p>

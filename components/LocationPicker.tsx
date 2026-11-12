@@ -3,7 +3,10 @@ import 'leaflet/dist/leaflet.css';
 import { useEffect, useRef } from 'react';
 
 // Small satellite map with a pin the user can drag onto the exact roof.
-export default function LocationPicker({ lat, lng, onChange }: { lat: number | null; lng: number | null; onChange: (lat: number, lng: number) => void }) {
+// The corner label shows the address of the pin in place of the map library's own mark; the imagery credit stays.
+const esc = (t: string) => t.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]!));
+
+export default function LocationPicker({ lat, lng, address, onChange }: { lat: number | null; lng: number | null; address?: string; onChange: (lat: number, lng: number) => void }) {
   const host = useRef<HTMLDivElement>(null);
   const map = useRef<any>(null);
   const marker = useRef<any>(null);
@@ -21,6 +24,7 @@ export default function LocationPicker({ lat, lng, onChange }: { lat: number | n
       const mk = L.marker([lat ?? 22.5, lng ?? 79], { draggable: true, icon, opacity: lat == null ? 0 : 1 }).addTo(m);
       mk.on('dragend', () => { const p = mk.getLatLng(); cb.current(p.lat, p.lng); });
       m.on('click', (e: any) => { mk.setLatLng(e.latlng); mk.setOpacity(1); cb.current(e.latlng.lat, e.latlng.lng); });
+      m.attributionControl.setPrefix(address ? esc(address) : false);
       map.current = m; marker.current = mk;
     });
     return () => { dead = true; map.current?.remove(); map.current = null; };
@@ -36,6 +40,8 @@ export default function LocationPicker({ lat, lng, onChange }: { lat: number | n
       map.current.setView([lat, lng], Math.max(map.current.getZoom(), 18));
     }
   }, [lat, lng]);
+
+  useEffect(() => { map.current?.attributionControl.setPrefix(address ? esc(address) : false); }, [address]);
 
   return <div className="pick-map" ref={host} />;
 }
