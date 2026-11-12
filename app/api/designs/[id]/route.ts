@@ -29,7 +29,7 @@ export async function PUT(req: Request, ctx: Ctx) {
   if (b.inverter) d.inverter = { name: String(b.inverter.name || ''), kw: Math.max(0, Number(b.inverter.kw) || 0), qty: Math.max(0, Math.round(Number(b.inverter.qty) || 0)) };
   if (typeof b.defaultModuleId === 'string') d.defaultModuleId = b.defaultModuleId;
   if (typeof b.structureName === 'string') d.structureName = b.structureName;
-  if (['longrail', 'monorail', 'minirail', 'reverse'].includes(b.defaultStructure)) d.defaultStructure = b.defaultStructure;
+  if (['longrail', 'monorail', 'minirail', 'reverse', 'reversep'].includes(b.defaultStructure)) d.defaultStructure = b.defaultStructure;
   if (typeof b.thumb === 'string') d.thumb = b.thumb;
   d.updatedAt = new Date().toISOString();
   await writeDb(db);

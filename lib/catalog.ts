@@ -36,6 +36,7 @@ export const STRUCTURES: { id: StructureId; name: string; orientation: Block['or
   { id: 'monorail', name: 'Mono rail', orientation: 'landscape' },
   { id: 'minirail', name: 'Mini rail', orientation: 'portrait' },
   { id: 'reverse', name: 'Reverse tilt', orientation: 'landscape', tilt: 15 },
+  { id: 'reversep', name: 'Reverse tilt', orientation: 'portrait', tilt: 12 },
 ];
 export const findStructure = (id?: StructureId) => STRUCTURES.find((s) => s.id === id) || STRUCTURES[0];
 // Panel sets saved before structures existed are matched by their orientation.
