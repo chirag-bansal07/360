@@ -1,6 +1,7 @@
 import { readDb, writeDb, findDesign, json, fail } from '@/lib/store';
 import { removeViewLink } from '@/lib/shares';
 import { pictureFor } from '@/lib/catalog';
+import { solarAllowed } from '@/lib/auth';
 
 export const dynamic = 'force-dynamic';
 type Ctx = { params: Promise<{ id: string }> };
@@ -10,7 +11,8 @@ export async function GET(_req: Request, ctx: Ctx) {
   const db = (await readDb());
   const hit = findDesign(db, id);
   if (!hit) return fail('Design not found.', 404);
-  if (!hit.project.imagery) { hit.project.imagery = pictureFor(hit.project); await writeDb(db); } // decided once, so drawing the first shed does not change the picture
+  // decided once (for logins that may use the aerial picture), so drawing the first shed does not change the picture
+  if (!hit.project.imagery && (await solarAllowed())) { hit.project.imagery = pictureFor(hit.project); await writeDb(db); }
   const { designs, ...project } = hit.project;
   return json({ design: hit.design, project, settings: { ...db.settings, googleMapsKey: '' } });
 }

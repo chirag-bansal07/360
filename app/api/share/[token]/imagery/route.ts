@@ -3,6 +3,7 @@ import { shareSpot } from '@/lib/shares';
 import { pickImagery } from '@/lib/imagery';
 import { HOSTED } from '@/lib/session';
 import { allow } from '@/lib/pg';
+import { solarAllowed } from '@/lib/auth';
 import { NEW_SITES_PER_DAY } from '@/lib/solar';
 
 export const dynamic = 'force-dynamic';
@@ -16,5 +17,5 @@ export async function GET(_req: Request, ctx: { params: Promise<{ token: string 
   const spot = await shareSpot(token);
   if (!spot) return fail('Not available.', 404);
   const mayFetch = async () => !HOSTED || ((await allow(`solar:share:${spot.ownerId}`, 5, 86400)) && (await allow(`solar:${spot.ownerId}`, NEW_SITES_PER_DAY, 86400)));
-  return json({ ...(await pickImagery(spot.lat, spot.lng, await getGoogleKeyOpen(), mayFetch)), warning: '' });
+  return json({ ...(await pickImagery(spot.lat, spot.lng, await getGoogleKeyOpen(), await solarAllowed(spot.ownerId), mayFetch)), warning: '' });
 }

@@ -1,3 +1,4 @@
+import { solarAllowed } from '@/lib/auth';
 import { readDb, writeDb, json, fail } from '@/lib/store';
 import { uid, newDesign } from '@/lib/catalog';
 import { guessUtcOffset } from '@/lib/sun';
@@ -43,7 +44,7 @@ export async function POST(req: Request) {
     displayAddress: String(b.displayAddress || b.address || '').trim(), type: b.type === 'residential' ? 'residential' : 'commercial',
     lat, lng, utcOffset: guessUtcOffset(lat, lng), createdAt: new Date().toISOString(), weather: null,
     ...(noMap ? { noMap: true } : {}),
-    imagery: 'auto',
+    ...((await solarAllowed()) ? { imagery: 'auto' as const } : {}),
     designs: [design],
   };
   db.projects.push(project);

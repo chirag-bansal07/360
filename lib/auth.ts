@@ -95,6 +95,17 @@ export async function userInfo(id: string): Promise<{ email: string; name: strin
   return rows[0] || null;
 }
 
+// Whether a login may use the Google Solar API aerial picture. It is off unless switched on for that login
+// (users.solar in the database). Everyone else gets Google map tiles only. On a local computer: SUNCRAFT_SOLAR=1.
+export async function solarAllowed(userId?: string | null): Promise<boolean> {
+  if (!HOSTED) return process.env.SUNCRAFT_SOLAR === '1';
+  const id = userId || (await currentUserId());
+  if (!id) return false;
+  await ensureSchema();
+  const rows = (await sql()`select solar from users where id = ${id}`) as any[];
+  return rows[0]?.solar === true;
+}
+
 // The admin runs the app. On a local computer the single user is the admin.
 export async function isAdmin(): Promise<boolean> {
   if (!HOSTED) return true;

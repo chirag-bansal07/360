@@ -9,9 +9,11 @@ const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', '
 
 // Picks the imagery. With a Google key the site itself is shown from the Google Solar API aerial picture (the sharpest),
 // laid over ordinary satellite tiles for the surroundings.
+// solar = this login may use the aerial picture at all; without it only map tiles are used.
 // mayFetch guards the paid first fetch of a site's aerial picture (see solarInfo).
-export async function pickImagery(lat: number, lng: number, key: string, mayFetch?: () => Promise<boolean>) {
+export async function pickImagery(lat: number, lng: number, key: string, solar = false, mayFetch?: () => Promise<boolean>) {
   const base = await pickTiles(lat, lng, key);
+  if (!solar) return { ...base, overlay: null, tilesCredit: base.credit };
   let overlay: SolarPic | null = null, warning = base.warning;
   try {
     overlay = await solarInfo(lat, lng, key, mayFetch);

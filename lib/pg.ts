@@ -24,6 +24,8 @@ export function ensureSchema(): Promise<void> {
       await q`alter table users add column if not exists sv int not null default 0`; // session version: raised on sign-out
       // role: 'admin' runs the app (Google key), 'company' is a normal sign-up. The admin is set directly in the database, never through sign-up.
       await q`alter table users add column if not exists role text not null default 'company'`;
+      // solar: this login may use the Google Solar API aerial picture. Off for everyone unless switched on for that login in the database.
+      await q`alter table users add column if not exists solar boolean not null default false`;
       await q`create unique index if not exists users_one_admin on users ((true)) where role = 'admin'`; // never more than one admin
       await q`create table if not exists app_settings (key text primary key, value text not null)`;
       await q`create table if not exists workspaces (

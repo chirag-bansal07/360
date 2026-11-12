@@ -1,7 +1,7 @@
 import { json, getGoogleKey, readDb } from '@/lib/store';
 import { pickImagery } from '@/lib/imagery';
 import { HOSTED } from '@/lib/session';
-import { requireUserId } from '@/lib/auth';
+import { requireUserId, solarAllowed } from '@/lib/auth';
 import { allow } from '@/lib/pg';
 import { NEW_SITES_PER_DAY } from '@/lib/solar';
 
@@ -17,5 +17,5 @@ export async function GET(req: Request) {
     if (!mine) return false;
     return HOSTED ? allow(`solar:${await requireUserId()}`, NEW_SITES_PER_DAY, 86400) : true;
   };
-  return json(await pickImagery(lat, lng, await getGoogleKey(), mayFetch));
+  return json(await pickImagery(lat, lng, await getGoogleKey(), await solarAllowed(), mayFetch));
 }
