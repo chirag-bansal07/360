@@ -113,7 +113,7 @@ export default function ReportScreen({ id, share }: { id?: string; share?: strin
       </div>
       {/* hidden canvas used only to draw the pictures */}
       <div className="no-print" style={{ position: 'fixed', left: -5000, top: 0, width: 800, height: 800 }}>
-        <SceneView ref={scene} lat={project.lat} lng={project.lng} plain={project.noMap} share={share} interactive={false} design={design} mods={mods} results={r} view="2d" tool="select" overlay={false} />
+        <SceneView ref={scene} lat={project.lat} lng={project.lng} plain={project.noMap} share={share} picture={project.imagery} interactive={false} design={design} mods={mods} results={r} view="2d" tool="select" overlay={false} />
       </div>
 
       {link && <ShareDialog title="Share this report" url={link} text={`${project.name}: solar plant layout report`} note="Anyone with this link can open the report and save it as a PDF. No sign-in is needed. The report stays as it is now, even if the design changes later." onClose={() => setLink('')} />}

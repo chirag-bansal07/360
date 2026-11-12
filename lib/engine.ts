@@ -21,7 +21,8 @@ export type EngineEvents = {
   onVertexMove?: (kind: DrawKind, id: string, index: number, x: number, z: number) => void;
   onDraw?: (info: { kind: DrawKind; points: Pt[]; cursor: Pt | null } | null) => void;
   onDrawDone?: (kind: DrawKind, points: Pt[]) => void;
-  onImagery?: (info: { credit: string; warning: string; provider: string; zoom: number }) => void;
+  // solar: set when a Google Solar API picture exists for the site; shown = it is the picture in use
+  onImagery?: (info: { credit: string; warning: string; provider: string; zoom: number; solar?: { shown: boolean } }) => void;
 };
 
 function panelTexture(cellsX: number, cellsY: number, blue: boolean) {
@@ -109,6 +110,9 @@ export class Engine {
   private raf = 0;
   private ro: ResizeObserver;
   private disposed = false;
+  private pic: THREE.Group | null = null; // Google Solar API picture of the site
+  private picInfo: { dark: boolean; credit: string; tilesCredit: string; warning: string; provider: string; zoom: number } | null = null;
+  private picChoice: 'auto' | 'solar' | 'tiles' | undefined;
   private drag: null | { sel: NonNullable<Selection>; obj: THREE.Object3D; ox: number; oz: number; gx: number; gz: number; gy: number; moved: boolean; placed: boolean } = null;
   private down: { x: number; y: number } | null = null;
   private handles: THREE.Mesh[] = [];
@@ -116,7 +120,7 @@ export class Engine {
   private draw: null | { kind: DrawKind; pts: Pt[]; cursor: Pt | null } = null;
   private drawGroup = new THREE.Group();
 
-  constructor(private el: HTMLElement, private opts: { lat: number; lng: number; interactive: boolean; plain?: boolean; share?: string }, private events: EngineEvents = {}) {
+  constructor(private el: HTMLElement, private opts: { lat: number; lng: number; interactive: boolean; plain?: boolean; share?: string; picture?: 'auto' | 'solar' | 'tiles' }, private events: EngineEvents = {}) {
     this.renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
     this.renderer.shadowMap.enabled = true;
@@ -176,12 +180,16 @@ export class Engine {
       return;
     }
     const base = this.opts.share ? `/api/share/${this.opts.share}` : '/api'; // a shared link loads its pictures through the link
-    let zoom = 18, provider = 'esri';
+    let zoom = 18, provider = 'esri', overlay: { sizeE: number; sizeN: number; dx: number; dz: number; rot: number; dark?: boolean } | null = null;
+    this.picChoice = this.opts.picture;
     try {
       const info = await (await fetch(`${base}/imagery?lat=${lat}&lng=${lng}`)).json();
-      zoom = info.zoom || 18; provider = info.provider || 'esri';
+      zoom = info.zoom || 18; provider = info.provider || 'esri'; overlay = info.overlay || null;
       this.credit = info.credit || this.credit;
-      this.events.onImagery?.({ credit: this.credit, warning: info.warning || '', provider, zoom });
+      if (overlay && overlay.sizeE > 0) {
+        this.picInfo = { dark: !!overlay.dark, credit: this.credit, tilesCredit: info.tilesCredit || this.credit, warning: info.warning || '', provider, zoom };
+        this.applyPicture();
+      } else this.events.onImagery?.({ credit: this.credit, warning: info.warning || '', provider, zoom });
     } catch { /* keep default */ }
     if (this.disposed) return;
     const mpp = metresPerPixel(lat, zoom);
@@ -217,6 +225,27 @@ export class Engine {
         img.src = `${base}/tile/${zoom}/${x0 + i}/${y0 + j}${provider === 'google' ? '?p=google' : ''}`;
       }));
     }
+    // the sharp aerial picture of the site itself (Google Solar API), laid just above the tiles
+    if (overlay && overlay.sizeE > 0) {
+      const o = overlay;
+      jobs.push(new Promise((resolve) => {
+        const img = new Image();
+        img.onload = () => {
+          if (this.disposed) return resolve();
+          const t = new THREE.Texture(img);
+          t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = this.renderer.capabilities.getMaxAnisotropy(); t.needsUpdate = true;
+          const pic = new THREE.Mesh(new THREE.PlaneGeometry(o.sizeE, o.sizeN), new THREE.MeshLambertMaterial({ map: t, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }));
+          pic.rotation.x = -Math.PI / 2; pic.receiveShadow = true;
+          const holder = new THREE.Group();
+          holder.add(pic); holder.position.set(o.dx, 0.004, o.dz); holder.rotation.y = (-o.rot * Math.PI) / 180;
+          this.scene.add(holder);
+          this.pic = holder;
+          this.applyPicture(); resolve();
+        };
+        img.onerror = () => resolve();
+        img.src = `${base}/solar?lat=${lat}&lng=${lng}`;
+      }));
+    }
     await Promise.all(jobs);
     if (this.disposed) return;
     try {
@@ -224,6 +253,18 @@ export class Engine {
       g.drawImage(src, 0, 0, canvas.width, canvas.height);
       tex.needsUpdate = true;
     } catch { /* keep the plain picture */ }
+    this.dirty = true;
+  }
+
+  // Which picture lies under the layout. Not set: the Google Solar API picture, unless it was taken in poor light.
+  setPicture(choice?: 'auto' | 'solar' | 'tiles') { this.picChoice = choice; this.applyPicture(); }
+  private applyPicture() {
+    const p = this.picInfo;
+    if (!p) return;
+    const shown = this.picChoice === 'solar' || (this.picChoice !== 'tiles' && !p.dark);
+    if (this.pic) this.pic.visible = shown;
+    this.credit = shown ? p.credit : p.tilesCredit;
+    this.events.onImagery?.({ credit: this.credit, warning: p.warning, provider: p.provider, zoom: p.zoom, solar: { shown } });
     this.dirty = true;
   }
 

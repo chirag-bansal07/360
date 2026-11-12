@@ -87,7 +87,7 @@ function refit(d: Design, mods: ModuleSpec[], only?: string): Design {
 export default function Editor() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
-  const { design, setDesign, project, settings, mods, error, stale, calculate, calcBusy, calcError } = useDesign(id);
+  const { design, setDesign, project, setProject, settings, mods, error, stale, calculate, calcBusy, calcError } = useDesign(id);
   const scene = useRef<SceneHandle>(null);
   const [sel, setSel] = useState<Selection>(null);
   const [multi, setMulti] = useState<Pick[]>([]); // Ctrl+click selection; used while nothing single is selected
@@ -467,7 +467,8 @@ export default function Editor() {
       </div>
 
       <div className="ed-canvas">
-        <SceneView ref={scene} lat={project.lat} lng={project.lng} plain={project.noMap} interactive design={design} mods={mods} results={res}
+        <SceneView ref={scene} lat={project.lat} lng={project.lng} plain={project.noMap} interactive picture={project.imagery}
+          onPicture={(c) => { setProject((p) => (p ? { ...p, imagery: c } : p)); api(`/api/projects/${project.id}`, 'PATCH', { imagery: c }).catch(() => {}); }} design={design} mods={mods} results={res}
           view={view} tool={tool} selected={sel} also={group ? multi : NO_PICKS} sun={sun} events={events} draw={draw} />
         {notice && <div className="hint" style={{ bottom: 58, background: '#1f6b2ee6' }}>{notice}</div>}
         <div className="hint">{hint}</div>

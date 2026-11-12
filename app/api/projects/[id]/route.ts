@@ -24,6 +24,7 @@ export async function PATCH(req: Request, ctx: Ctx) {
     if (typeof b[k] === 'string') (project as any)[k] = b[k].trim();
   }
   if (b.type === 'residential' || b.type === 'commercial') project.type = b.type;
+  if (b.imagery === 'solar' || b.imagery === 'tiles') project.imagery = b.imagery;
   if (!project.name || !project.clientName) return fail('Project name and client name cannot be empty.');
   await writeDb(db);
   return json({ project: slim(project) });

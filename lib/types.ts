@@ -98,6 +98,9 @@ export type Project = {
   lat: number;
   lng: number;
   utcOffset: number;
+  // Picture under the layout. 'solar' = Google Solar API aerial picture, 'tiles' = ordinary satellite tiles (both chosen with the editor's switch),
+  // 'auto' = the aerial picture when Google has a good one. Not set = a project from before aerial pictures: see pictureFor.
+  imagery?: 'auto' | 'solar' | 'tiles';
   noMap?: boolean; // made from shed dimensions: no satellite picture; lat/lng (a nearby town, or central India) only feed sun and weather
   createdAt: string;
   weather: Weather | null;

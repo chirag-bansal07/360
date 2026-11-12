@@ -3,9 +3,28 @@ import fs from 'fs';
 import path from 'path';
 import { tileXY } from './mercator';
 import { googleSession, googleTileUrl } from './google';
+import { solarInfo, type SolarPic } from './solar';
 
-// Picks the imagery source and the sharpest zoom level that really has pictures at this spot.
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+// Picks the imagery. With a Google key the site itself is shown from the Google Solar API aerial picture (the sharpest),
+// laid over ordinary satellite tiles for the surroundings.
 export async function pickImagery(lat: number, lng: number, key: string) {
+  const base = await pickTiles(lat, lng, key);
+  let overlay: SolarPic | null = null, warning = base.warning;
+  try {
+    overlay = await solarInfo(lat, lng, key);
+  } catch (e: any) {
+    if (!warning) warning = `Google Solar API imagery could not be used (${e?.message || 'no connection'}). Check that “Solar API” is enabled for the key in Google Cloud.`;
+  }
+  if (!overlay) return { ...base, warning, overlay: null, tilesCredit: base.credit };
+  const [y, m] = overlay.date.split('-').map(Number);
+  const credit = `Imagery © Google${y ? ` (Solar API, ${MONTHS[(m || 1) - 1]} ${y})` : ''}${base.provider === 'google' ? '' : ` · surroundings ${base.credit.replace('Imagery ', '')}`}`;
+  return { ...base, credit, warning: base.provider === 'google' ? '' : warning, overlay, tilesCredit: base.credit };
+}
+
+// The tile source and the sharpest zoom level that really has pictures at this spot.
+async function pickTiles(lat: number, lng: number, key: string) {
   let warning = '';
   if (key) {
     try {

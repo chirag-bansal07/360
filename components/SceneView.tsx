@@ -5,6 +5,7 @@ import type { ColorMode, DrawKind, Engine, EngineEvents, Selection, Tool } from 
 
 type Props = {
   lat: number; lng: number; interactive: boolean; plain?: boolean; share?: string;
+  picture?: 'auto' | 'solar' | 'tiles'; onPicture?: (choice: 'solar' | 'tiles') => void; // which picture lies under the layout, and the editor's switch for it
   design: Design; mods: ModuleSpec[]; results: Results | null;
   view: '2d' | '3d'; tool: Tool; selected?: Selection; also?: NonNullable<Selection>[];
   sun?: [number, number, number] | null; colorMode?: ColorMode;
@@ -19,7 +20,7 @@ const SceneView = forwardRef<SceneHandle, Props>(function SceneView(p, ref) {
   const [az, setAz] = useState(0);
   const [hover, setHover] = useState<{ action: string; x: number; y: number } | null>(null);
   const [failed, setFailed] = useState('');
-  const [imagery, setImagery] = useState({ credit: 'Imagery © Esri, Maxar, Earthstar Geographics', warning: '' });
+  const [imagery, setImagery] = useState<{ credit: string; warning: string; solar?: { shown: boolean } }>({ credit: 'Imagery © Esri, Maxar, Earthstar Geographics', warning: '' });
   events.current = p.events || {};
   useImperativeHandle(ref, () => ({ engine: () => eng.current }));
 
@@ -28,7 +29,7 @@ const SceneView = forwardRef<SceneHandle, Props>(function SceneView(p, ref) {
     import('@/lib/engine').then(({ Engine }) => {
       if (dead || !host.current) return;
       try {
-        const e = new Engine(host.current, { lat: p.lat, lng: p.lng, interactive: p.interactive, plain: p.plain, share: p.share }, {
+        const e = new Engine(host.current, { lat: p.lat, lng: p.lng, interactive: p.interactive, plain: p.plain, share: p.share, picture: p.picture }, {
           onSelect: (s, add) => events.current.onSelect?.(s, add),
           onMove: (s, x, z) => events.current.onMove?.(s, x, z),
           canMove: (s, x, z) => events.current.canMove?.(s, x, z) ?? true,
@@ -54,6 +55,7 @@ const SceneView = forwardRef<SceneHandle, Props>(function SceneView(p, ref) {
   }, [p.lat, p.lng, p.plain]);
 
   useEffect(() => { eng.current?.setData(p.design, p.mods, p.results); }, [p.design, p.mods, p.results]);
+  useEffect(() => { eng.current?.setPicture(p.picture); }, [p.picture]);
   useEffect(() => { eng.current?.setView(p.view); }, [p.view]);
   useEffect(() => { eng.current?.setTool(p.tool); if (p.tool !== 'panels') setHover(null); }, [p.tool]);
   useEffect(() => { eng.current?.setSelected(p.selected || null); }, [p.selected]);
@@ -69,7 +71,9 @@ const SceneView = forwardRef<SceneHandle, Props>(function SceneView(p, ref) {
       {p.overlay !== false && (
         <>
           <div className="compass"><i style={{ transform: `rotate(${az}deg)` }} /></div>
-          <div className="attrib">{imagery.credit}{imagery.warning && <> · {imagery.warning}</>}</div>
+          <div className="attrib">{imagery.credit}{imagery.warning && <> · {imagery.warning}</>}
+            {imagery.solar && p.onPicture && <> · <button type="button" className="attrib-btn" title="The two pictures can sit a few metres apart. Sheds drawn on one may need a small move on the other." onClick={() => p.onPicture!(imagery.solar!.shown ? 'tiles' : 'solar')}>{imagery.solar.shown ? 'Use the standard satellite picture' : 'Use the Google aerial picture'}</button></>}
+          </div>
         </>
       )}
       {hover && <div className="hover-tip" style={{ left: hover.x, top: hover.y }}>{hover.action === 'remove' ? 'Click to remove this panel' : 'Click to add a panel here'}</div>}

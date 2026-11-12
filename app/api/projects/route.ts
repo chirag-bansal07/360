@@ -43,6 +43,7 @@ export async function POST(req: Request) {
     displayAddress: String(b.displayAddress || b.address || '').trim(), type: b.type === 'residential' ? 'residential' : 'commercial',
     lat, lng, utcOffset: guessUtcOffset(lat, lng), createdAt: new Date().toISOString(), weather: null,
     ...(noMap ? { noMap: true } : {}),
+    imagery: 'auto',
     designs: [design],
   };
   db.projects.push(project);

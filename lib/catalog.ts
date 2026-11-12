@@ -49,6 +49,11 @@ export const structureOf = (b: Block) => {
   return st;
 };
 
+// Which picture a project uses. A project that already had sheds or panels before aerial pictures existed was drawn
+// on the satellite tiles, and the two pictures can sit a few metres apart, so it stays on the tiles until switched by hand.
+export const pictureFor = (p: { imagery?: 'auto' | 'solar' | 'tiles'; designs: Design[] }): 'auto' | 'solar' | 'tiles' =>
+  p.imagery || (p.designs.some((d) => d.sheds.length || d.blocks.length) ? 'tiles' : 'auto');
+
 export const uid = () => Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4);
 
 export function newBlock(design: Design, x = 0, z = 0): Block {

@@ -34,5 +34,5 @@ export function useDesign(id: string | undefined, share?: string) {
     } catch (e: any) { setCalcError(e.message); return null; } finally { setCalcBusy(false); }
   }, [id]);
 
-  return { design, setDesign, project, settings, mods, error, stale, calculate, calcBusy, calcError, sharedAt };
+  return { design, setDesign, project, setProject, settings, mods, error, stale, calculate, calcBusy, calcError, sharedAt };
 }

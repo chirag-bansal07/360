@@ -11,7 +11,7 @@ import { HOSTED } from './session';
 import { requireUserId } from './auth';
 import { ensureSchema, sql } from './pg';
 import { readDb, readDbOf, findDesign } from './store';
-import { allModules } from './catalog';
+import { allModules, pictureFor } from './catalog';
 import { designTotals } from './geometry';
 
 export type ReportMeta = { designName: string; kwp: number; modules: number; annualAc: number; stamp: string };
@@ -44,6 +44,7 @@ async function insert(row: Row) {
 // What a visitor receives: no client phone or email, no weather table, no keys.
 function publicCopy(project: Project | Omit<Project, 'designs'>, design: Design, settings: Settings, withClient: boolean) {
   const { designs, weather, phone, email, ...p } = project as Project;
+  if (!p.imagery && designs) p.imagery = pictureFor({ imagery: undefined, designs });
   return {
     design: { ...design, thumb: undefined } as Design,
     project: { ...p, clientName: withClient ? p.clientName : '', phone: '', email: '', weather: null } as Omit<Project, 'designs'>,
