@@ -1,5 +1,5 @@
 'use client';
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import LocationPicker from './LocationPicker';
 import { api } from '@/lib/client';
@@ -18,26 +18,33 @@ export default function CreateProject({ onClose }: { onClose: () => void }) {
   const [busy, setBusy] = useState('');
   const [err, setErr] = useState('');
   const set = (k: string, v: string) => setF((s) => ({ ...s, [k]: v }));
+  // answers already received in this window: pressing Find again on the same text asks the server nothing
+  const seen = useRef(new Map<string, any>());
+  const once = async (key: string, ask: () => Promise<any>) => {
+    if (!seen.current.has(key)) seen.current.set(key, await ask());
+    return seen.current.get(key);
+  };
 
   async function place(lat: number, lng: number, label?: string) {
     setPos({ lat, lng }); setMatches([]); setMatchNote(''); setErr('');
     let address = label || '';
     if (!address) {
-      try { address = (await api(`/api/geocode?lat=${lat}&lng=${lng}`)).address || ''; } catch { /* address stays as typed */ }
+      try { address = (await once(`at:${lat.toFixed(5)},${lng.toFixed(5)}`, () => api(`/api/geocode?lat=${lat}&lng=${lng}`))).address || ''; } catch { /* address stays as typed */ }
     }
     if (address) setF((s) => ({ ...s, address, displayAddress: s.displayAddress || address }));
   }
 
   async function find() {
+    if (busy) return; // a search is already running
     const t = loc.trim();
     if (!t) { setErr(mode === 'shed' ? 'Type the nearest town or city, or leave it empty.' : 'Paste a Google Maps link, coordinates, or type a place name.'); return; }
     setErr(''); setMatches([]); setMatchNote('');
     const direct = parseLatLng(t);
-    if (direct && !direct.approx) return place(direct.lat, direct.lng);
     setBusy('find');
+    if (direct && !direct.approx) { await place(direct.lat, direct.lng); setBusy(''); return; }
     try {
       if (/^https?:\/\//i.test(t)) {
-        const r = await api('/api/maplink', 'POST', { text: t });
+        const r = await once(`link:${t}`, () => api('/api/maplink', 'POST', { text: t }));
         if (r.results) { // the link names a place but has no position: offer the map matches, never guess
           setMatches(r.results);
           setMatchNote(`This link has no exact position in it, only the name “${r.name}”. ${r.match === 'exact' ? 'These are the map matches for that name' : r.match === 'near' ? 'The exact place is not on the map; these are the nearest areas found' : 'Nothing in India has this name; these matches are in other countries'}: pick one, then drag the pin onto the roof. For an exact pin, copy the coordinates from Google Maps instead.`);
@@ -46,7 +53,7 @@ export default function CreateProject({ onClose }: { onClose: () => void }) {
           if (r.approx) setMatchNote('This link gives the centre of the map view, not an exact pin. Check the pin and drag it onto the roof.');
         }
       } else {
-        const r = await api(`/api/geocode?q=${encodeURIComponent(t)}`);
+        const r = await once(`q:${t.toLowerCase()}`, () => api(`/api/geocode?q=${encodeURIComponent(t)}`));
         if (!r.results.length) setErr('No place found with that name. Try a nearby town, or paste a Google Maps link.');
         // only an exact match inside India is placed straight away; anything less sure is offered as a choice
         else if (r.results.length === 1 && r.match === 'exact') await place(r.results[0].lat, r.results[0].lng, r.results[0].label);

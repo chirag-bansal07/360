@@ -3,7 +3,7 @@ import { randomBytes, scrypt as scryptCb, timingSafeEqual } from 'crypto';
 import { promisify } from 'util';
 import { cookies } from 'next/headers';
 import { COOKIE, HOSTED, MAX_AGE, signSession, verifySession } from './session';
-import { ensureSchema, forgetSession, sql } from './pg';
+import { allow, ensureSchema, forgetSession, sql } from './pg';
 import { uid } from './catalog';
 
 const scrypt = promisify(scryptCb) as (pw: string, salt: Buffer, len: number) => Promise<Buffer>;
@@ -104,6 +104,13 @@ export async function solarAllowed(userId?: string | null): Promise<boolean> {
   await ensureSchema();
   const rows = (await sql()`select solar from users where id = ${id}`) as any[];
   return rows[0]?.solar === true;
+}
+
+// Place searches and link look-ups go to outside services: each login gets 60 in ten minutes.
+export async function searchAllowed(): Promise<boolean> {
+  if (!HOSTED) return true;
+  const id = await currentUserId();
+  return !!id && allow(`geo:${id}`, 60, 600);
 }
 
 // The admin runs the app. On a local computer the single user is the admin.

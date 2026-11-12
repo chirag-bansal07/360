@@ -3,7 +3,19 @@ export const GEO_UA = { 'User-Agent': 'solar-layout-planner/1.0 (local desktop a
 export type Hit = { label: string; lat: number; lng: number };
 export type Match = 'exact' | 'near' | 'abroad';
 
-async function search(q: string, india: boolean): Promise<Hit[]> {
+// Answers are remembered for 15 minutes, so repeating a search does not ask the map service again.
+const kept = new Map<string, { at: number; value: any }>();
+export async function remembered<T>(key: string, ask: () => Promise<T>): Promise<T> {
+  const hit = kept.get(key);
+  if (hit && Date.now() - hit.at < 900000) return hit.value as T;
+  const value = await ask();
+  if (kept.size > 3000) kept.clear();
+  kept.set(key, { at: Date.now(), value });
+  return value;
+}
+
+const search = (q: string, india: boolean) => remembered(`s:${india ? 1 : 0}:${q.trim().toLowerCase()}`, () => searchNow(q, india));
+async function searchNow(q: string, india: boolean): Promise<Hit[]> {
   const r = await fetch(`https://nominatim.openstreetmap.org/search?format=jsonv2&limit=6${india ? '&countrycodes=in' : ''}&q=${encodeURIComponent(q)}`, { headers: GEO_UA, signal: AbortSignal.timeout(15000) });
   if (!r.ok) throw new Error(`search answered ${r.status}`);
   const list = (await r.json()) as any[];

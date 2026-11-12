@@ -1,6 +1,7 @@
 import { json, fail } from '@/lib/store';
 import { parseLatLng, placeName, isGoogleMapsHost } from '@/lib/maplink';
 import { findPlace } from '@/lib/geosearch';
+import { searchAllowed } from '@/lib/auth';
 
 export const dynamic = 'force-dynamic';
 
@@ -14,6 +15,7 @@ export async function POST(req: Request) {
   const { text } = await req.json();
   const t = String(text || '').trim();
   if (!t) return fail('Paste a Google Maps link first.');
+  if (!(await searchAllowed())) return fail('Too many searches in a short time. Wait a few minutes and try again.', 429);
   const direct = parseLatLng(t);
   if (direct && !direct.approx) return json(direct);
   if (!/^https:\/\//i.test(t)) return direct ? json(direct) : fail('That does not look like a Google Maps link or coordinates. Example: 29.37816, 77.03216');
