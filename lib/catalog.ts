@@ -54,7 +54,7 @@ export const uid = () => Math.random().toString(36).slice(2, 10) + Date.now().to
 export function newBlock(design: Design, x = 0, z = 0): Block {
   const n = design.blocks.length + 1, st = findStructure(design.defaultStructure || 'monorail');
   return {
-    id: uid(), name: `Block ${n}`, x, z, azimuth: 180, rows: 4, cols: 10, orientation: st.orientation, structure: st.id,
+    id: uid(), name: `Block ${n}`, x, z, azimuth: 180, rows: 1, cols: 1, orientation: st.orientation, structure: st.id,
     moduleId: design.defaultModuleId, mounting: st.tilt ? 'rows' : 'flush', tilt: st.tilt ?? 5, ownTilt: !!st.tilt, mountHeight: 1,
     gapH: 0.025, gapV: st.gapV ?? 0.025, aisleRowsEvery: 0, aisleRowsGap: 0.6, aisleColsEvery: 0, aisleColsGap: 0.6, removed: [],
   };

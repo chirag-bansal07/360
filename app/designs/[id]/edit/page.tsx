@@ -216,7 +216,7 @@ export default function Editor() {
     const placed = settle(refit({ ...d, blocks: [...d.blocks, b] }, mods, shed.id), { kind: 'block', id: b.id });
     apply(refit(placed.design, mods, shed.id));
     setSel({ kind: 'block', id: b.id }); setTool('select');
-    setNotice(placed.crowded ? CROWDED : `Panel set added: ${b.rows} rows × ${b.cols} columns. Set rows, columns and gaps on the right, and drag it into place.`);
+    setNotice(placed.crowded ? CROWDED : `Panel set added with 1 row × 1 column. Set rows, columns and gaps on the right, and drag it into place.`);
   };
   const clearPanels = (shedId: string) => {
     const d = latest.current!;
