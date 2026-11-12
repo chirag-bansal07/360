@@ -7,6 +7,9 @@ import { parseLatLng } from '@/lib/maplink';
 
 export default function CreateProject({ onClose }: { onClose: () => void }) {
   const router = useRouter();
+  const [mode, setMode] = useState<'map' | 'shed'>('map'); // shed = no map: the project starts from typed shed dimensions
+  const [shed, setShed] = useState({ length: '40', width: '20', height: '6', tilt: '0', slopeAz: 180, setback: '0.3' });
+  const sh = (k: string, v: string | number) => setShed((x) => ({ ...x, [k]: v }));
   const [loc, setLoc] = useState('');
   const [pos, setPos] = useState<{ lat: number; lng: number } | null>(null);
   const [matches, setMatches] = useState<{ label: string; lat: number; lng: number }[]>([]);
@@ -27,7 +30,7 @@ export default function CreateProject({ onClose }: { onClose: () => void }) {
 
   async function find() {
     const t = loc.trim();
-    if (!t) { setErr('Paste a Google Maps link, coordinates, or type a place name.'); return; }
+    if (!t) { setErr(mode === 'shed' ? 'Type the nearest town or city, or leave it empty.' : 'Paste a Google Maps link, coordinates, or type a place name.'); return; }
     setErr(''); setMatches([]); setMatchNote('');
     const direct = parseLatLng(t);
     if (direct && !direct.approx) return place(direct.lat, direct.lng);
@@ -54,12 +57,19 @@ export default function CreateProject({ onClose }: { onClose: () => void }) {
   }
 
   async function create() {
-    if (!pos) { setErr('Set the project location first: paste a Google Maps link and press Find, or click on the map.'); return; }
+    const L = Number(shed.length), W = Number(shed.width);
+    if (mode === 'map' && !pos) { setErr('Set the project location first: paste a Google Maps link and press Find, or click on the map.'); return; }
+    if (mode === 'shed' && (!(L >= 1 && L <= 1000) || !(W >= 1 && W <= 1000))) { setErr('Enter the shed length and width in metres.'); return; }
     if (!f.name.trim()) { setErr('Enter a project name.'); return; }
     if (!f.clientName.trim()) { setErr('Enter the client name.'); return; }
     if (f.email && !/^\S+@\S+\.\S+$/.test(f.email)) { setErr('The email address does not look right.'); return; }
     setBusy('create'); setErr('');
     try {
+      if (mode === 'shed') {
+        const r = await api('/api/projects', 'POST', { ...f, ...(pos || {}), noMap: true, shed: { length: L, width: W, height: Number(shed.height), tilt: Number(shed.tilt), slopeAz: shed.slopeAz, setback: Number(shed.setback) } });
+        router.push(`/designs/${r.project.designs[0].id}/edit`); // straight to the editor: the shed is already there
+        return;
+      }
       const r = await api('/api/projects', 'POST', { ...f, ...pos });
       router.push(`/projects/${r.project.id}`);
     } catch (e: any) { setErr(e.message); setBusy(''); }
@@ -70,13 +80,17 @@ export default function CreateProject({ onClose }: { onClose: () => void }) {
       <div className="modal">
         <div className="modal-head">Create a new project<button className="icon-btn" onClick={onClose} aria-label="Close">✕</button></div>
         <div className="modal-body">
+          <div className="seg" style={{ marginBottom: 14 }}>
+            <button className={mode === 'map' ? 'on' : ''} onClick={() => { setMode('map'); setErr(''); }}>Find on the map</button>
+            <button className={mode === 'shed' ? 'on' : ''} onClick={() => { setMode('shed'); setErr(''); }}>Shed dimensions (no map)</button>
+          </div>
           {err && <div className="error">{err}</div>}
           <div className="create-grid">
             <div>
               <div className="field">
-                <label>Location <span className="req">*</span></label>
+                <label>{mode === 'shed' ? 'Nearest town' : <>Location <span className="req">*</span></>}</label>
                 <div className="row" style={{ flexWrap: 'nowrap' }}>
-                  <input className="input" autoFocus placeholder="Paste Google Maps link, coordinates, or type a place" value={loc}
+                  <input className="input" autoFocus placeholder={mode === 'shed' ? 'Optional: town or city, for sun and weather' : 'Paste Google Maps link, coordinates, or type a place'} value={loc}
                     onChange={(e) => setLoc(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && find()} />
                   <button className="btn dark" onClick={find} disabled={busy === 'find'}>{busy === 'find' ? 'Finding…' : 'Find'}</button>
                 </div>
@@ -99,10 +113,42 @@ export default function CreateProject({ onClose }: { onClose: () => void }) {
               </div>
             </div>
             <div>
+              {mode === 'map' ? (<>
               <LocationPicker lat={pos?.lat ?? null} lng={pos?.lng ?? null} address={pos ? f.address : ''} onChange={(a, b) => place(a, b)} />
               <p className="muted small" style={{ marginTop: 8 }}>
                 {pos ? <>Pin at <b>{pos.lat.toFixed(6)}, {pos.lng.toFixed(6)}</b>. Drag the pin or click the map to put it exactly on the roof.</> : 'Find a location, or zoom in and click the map to drop the pin on the roof.'}
               </p>
+              </>) : (
+                <div>
+                  <div className="shed-form">
+                  <svg className="shed-plan" viewBox="0 0 200 110" role="img" aria-label="Shed outline">
+                    {(() => {
+                      const L = Math.max(Number(shed.length) || 1, 1), W = Math.max(Number(shed.width) || 1, 1), k = Math.min(150 / L, 70 / W), w = L * k, h = W * k, x = 100 - w / 2, y = 52 - h / 2;
+                      return <>
+                        <rect x={x} y={y} width={w} height={h} rx="2" fill="rgba(240,140,0,.12)" stroke="var(--sun-d)" strokeWidth="1.5" />
+                        <text x="100" y={y + h + 12} textAnchor="middle" fontSize="9" fill="var(--ink2)">{shed.length || 0} m (east–west)</text>
+                        <text x={x - 5} y="54" textAnchor="end" fontSize="9" fill="var(--ink2)">{shed.width || 0} m</text>
+                        <text x="192" y="12" textAnchor="end" fontSize="9" fontWeight="700" fill="var(--ink2)">N ↑</text>
+                      </>;
+                    })()}
+                  </svg>
+                  <div className="field"><label>Length<br /><span className="muted small">east to west, m</span></label><input className="input" type="number" min={0} step={0.5} value={shed.length} onChange={(e) => sh('length', e.target.value)} /></div>
+                  <div className="field"><label>Width<br /><span className="muted small">north to south, m</span></label><input className="input" type="number" min={0} step={0.5} value={shed.width} onChange={(e) => sh('width', e.target.value)} /></div>
+                  <div className="field"><label>Roof height<br /><span className="muted small">at the lowest edge, m</span></label><input className="input" type="number" min={0} step={0.5} value={shed.height} onChange={(e) => sh('height', e.target.value)} /></div>
+                  <div className="field"><label>Roof tilt<br /><span className="muted small">0 = flat roof, degrees</span></label><input className="input" type="number" min={0} step={0.5} value={shed.tilt} onChange={(e) => sh('tilt', e.target.value)} /></div>
+                  {Number(shed.tilt) > 0 && (
+                    <div className="field"><label>Slopes down to</label>
+                      <div className="seg">{[['N', 0], ['E', 90], ['S', 180], ['W', 270]].map(([l, az]) => <button key={l} className={shed.slopeAz === az ? 'on' : ''} onClick={() => sh('slopeAz', az as number)}>{l}</button>)}</div>
+                    </div>
+                  )}
+                  <div className="field"><label>Edge margin<br /><span className="muted small">kept free of panels, m</span></label><input className="input" type="number" min={0} step={0.05} value={shed.setback} onChange={(e) => sh('setback', e.target.value)} /></div>
+                  </div>
+                  <p className="muted small" style={{ marginTop: 8 }}>
+                    The project opens in the editor with this shed on plain ground, ready for panels. Everything can be changed there.{' '}
+                    {pos ? <>Sun and weather data: <b>{f.address || `${pos.lat.toFixed(3)}, ${pos.lng.toFixed(3)}`}</b>.</> : <>No town set: generation figures will use central India and are only approximate. Add the nearest town for accurate figures.</>}
+                  </p>
+                </div>
+              )}
             </div>
           </div>
         </div>

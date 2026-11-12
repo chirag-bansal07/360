@@ -445,7 +445,7 @@ export default function Editor() {
       </div>
 
       <div className="ed-canvas">
-        <SceneView ref={scene} lat={project.lat} lng={project.lng} interactive design={design} mods={mods} results={res}
+        <SceneView ref={scene} lat={project.lat} lng={project.lng} plain={project.noMap} interactive design={design} mods={mods} results={res}
           view={view} tool={tool} selected={sel} also={group ? multi : NO_PICKS} sun={sun} events={events} draw={draw} />
         {notice && <div className="hint" style={{ bottom: 58, background: '#1f6b2ee6' }}>{notice}</div>}
         <div className="hint">{hint}</div>

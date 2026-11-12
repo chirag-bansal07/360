@@ -59,7 +59,7 @@ export default function Viewer() {
         <Link className="btn sm primary" href={`/designs/${id}/report`}>Report (PDF)</Link>
       </div>
       <div className="ed-canvas">
-        <SceneView ref={scene} lat={project.lat} lng={project.lng} interactive={false} design={design} mods={mods} results={r}
+        <SceneView ref={scene} lat={project.lat} lng={project.lng} plain={project.noMap} interactive={false} design={design} mods={mods} results={r}
           view={view} tool={editing ? 'panels' : 'select'} sun={sun} colorMode={mode} events={events} />
         <div className="hint">{editing ? 'Click a panel to remove it · click a faded slot to add a panel · changes save by themselves' : view === '3d' ? 'Drag to rotate · right-drag to pan · scroll to zoom' : 'Drag to pan · scroll to zoom'}</div>
       </div>

@@ -115,7 +115,7 @@ export class Engine {
   private draw: null | { kind: DrawKind; pts: Pt[]; cursor: Pt | null } = null;
   private drawGroup = new THREE.Group();
 
-  constructor(private el: HTMLElement, private opts: { lat: number; lng: number; interactive: boolean }, private events: EngineEvents = {}) {
+  constructor(private el: HTMLElement, private opts: { lat: number; lng: number; interactive: boolean; plain?: boolean }, private events: EngineEvents = {}) {
     this.renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
     this.renderer.shadowMap.enabled = true;
@@ -163,6 +163,17 @@ export class Engine {
   // ---------- imagery ----------
   private async loadImagery() {
     const { lat, lng } = this.opts;
+    if (this.opts.plain) { // project made from shed dimensions: plain ground with a 5 m grid, no satellite picture
+      this.credit = '';
+      this.ground.geometry.dispose();
+      this.ground.geometry = new THREE.PlaneGeometry(1200, 1200);
+      (this.ground.material as THREE.MeshLambertMaterial).color.set('#cdd4da');
+      const grid = new THREE.GridHelper(1200, 240, '#8f9aa5', '#b4bdc6');
+      grid.position.y = 0.02;
+      this.scene.add(grid);
+      this.events.onImagery?.({ credit: 'No map · plain ground with a 5 m grid', warning: '', provider: 'none', zoom: 0 });
+      return;
+    }
     let zoom = 18, provider = 'esri';
     try {
       const info = await (await fetch(`/api/imagery?lat=${lat}&lng=${lng}`)).json();

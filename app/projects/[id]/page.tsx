@@ -52,7 +52,7 @@ export default function ProjectPage() {
           <div><span>Email</span><b>{p.email || '-'}</b></div>
           <div><span>Project address</span><b>{p.address || '-'}</b></div>
           <div><span>Display address</span><b>{p.displayAddress || '-'}</b></div>
-          <div><span>Location</span><b>{p.lat.toFixed(5)}, {p.lng.toFixed(5)}</b></div>
+          <div><span>Location</span><b>{p.noMap ? `No map (shed dimensions). Sun and weather: ${p.address || 'central India'}` : `${p.lat.toFixed(5)}, ${p.lng.toFixed(5)}`}</b></div>
           <div><span>Created on</span><b>{fmtDate(p.createdAt)} · {p.type}</b></div>
           <div><span>Weather data</span><b>{p.weather ? p.weather.source : 'Downloaded at first calculation'}</b></div>
         </div>

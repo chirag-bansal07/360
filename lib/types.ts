@@ -98,6 +98,7 @@ export type Project = {
   lat: number;
   lng: number;
   utcOffset: number;
+  noMap?: boolean; // made from shed dimensions: no satellite picture; lat/lng (a nearby town, or central India) only feed sun and weather
   createdAt: string;
   weather: Weather | null;
   designs: Design[];

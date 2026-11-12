@@ -106,7 +106,7 @@ export default function Report() {
       </div>
       {/* hidden canvas used only to draw the pictures */}
       <div className="no-print" style={{ position: 'fixed', left: -5000, top: 0, width: 800, height: 800 }}>
-        <SceneView ref={scene} lat={project.lat} lng={project.lng} interactive={false} design={design} mods={mods} results={r} view="2d" tool="select" overlay={false} />
+        <SceneView ref={scene} lat={project.lat} lng={project.lng} plain={project.noMap} interactive={false} design={design} mods={mods} results={r} view="2d" tool="select" overlay={false} />
       </div>
 
       {!r ? (
@@ -124,7 +124,7 @@ export default function Report() {
               <div className="tag"><b>Solar plant layout report</b>{fmtDateTime(now).split(' | ')[0]}</div>
             </div>
             <h1>{project.name}</h1>
-            <p className="rp-addr">{project.displayAddress || project.address} · {project.lat.toFixed(5)}, {project.lng.toFixed(5)}</p>
+            <p className="rp-addr">{project.noMap ? (project.displayAddress || project.address || 'Layout from shed dimensions') : `${project.displayAddress || project.address} · ${project.lat.toFixed(5)}, ${project.lng.toFixed(5)}`}</p>
             <div className="rp-hero"><Img src={pics?.top} /></div>
             <div className="credit">{CREDIT}</div>
             <div className="rp-strip">

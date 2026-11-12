@@ -4,7 +4,7 @@ import type { Design, ModuleSpec, Results } from '@/lib/types';
 import type { ColorMode, DrawKind, Engine, EngineEvents, Selection, Tool } from '@/lib/engine';
 
 type Props = {
-  lat: number; lng: number; interactive: boolean;
+  lat: number; lng: number; interactive: boolean; plain?: boolean;
   design: Design; mods: ModuleSpec[]; results: Results | null;
   view: '2d' | '3d'; tool: Tool; selected?: Selection; also?: NonNullable<Selection>[];
   sun?: [number, number, number] | null; colorMode?: ColorMode;
@@ -28,7 +28,7 @@ const SceneView = forwardRef<SceneHandle, Props>(function SceneView(p, ref) {
     import('@/lib/engine').then(({ Engine }) => {
       if (dead || !host.current) return;
       try {
-        const e = new Engine(host.current, { lat: p.lat, lng: p.lng, interactive: p.interactive }, {
+        const e = new Engine(host.current, { lat: p.lat, lng: p.lng, interactive: p.interactive, plain: p.plain }, {
           onSelect: (s, add) => events.current.onSelect?.(s, add),
           onMove: (s, x, z) => events.current.onMove?.(s, x, z),
           onTogglePanel: (b, k, a) => events.current.onTogglePanel?.(b, k, a),
@@ -50,7 +50,7 @@ const SceneView = forwardRef<SceneHandle, Props>(function SceneView(p, ref) {
     });
     return () => { dead = true; eng.current?.dispose(); eng.current = null; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [p.lat, p.lng]);
+  }, [p.lat, p.lng, p.plain]);
 
   useEffect(() => { eng.current?.setData(p.design, p.mods, p.results); }, [p.design, p.mods, p.results]);
   useEffect(() => { eng.current?.setView(p.view); }, [p.view]);
