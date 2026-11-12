@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useState } from 'react';
-import Shell from '@/components/Shell';
+import Shell, { setCompany } from '@/components/Shell';
 import Num from '@/components/Num';
 import { api } from '@/lib/client';
 import { BUILTIN_MODULES, DEFAULT_LOSSES, uid } from '@/lib/catalog';
@@ -39,7 +39,7 @@ export default function SettingsPage() {
   const mod = (i: number, k: string, v: any) => setS({ ...s, customModules: s.customModules.map((m, j) => (j === i ? { ...m, [k]: v } : m)) });
   async function save() {
     setBusy(true); setMsg(null);
-    try { const r = await api('/api/settings', 'PUT', { ...s, removeGoogleKey: dropKey }); setS(r.settings); setDropKey(false); setMsg({ ok: true, text: 'Settings saved. Recalculate a design to apply changed loss values.' }); }
+    try { const r = await api('/api/settings', 'PUT', { ...s, removeGoogleKey: dropKey }); setS(r.settings); setCompany(r.settings.company); setDropKey(false); setMsg({ ok: true, text: 'Settings saved. Recalculate a design to apply changed loss values.' }); }
     catch (e: any) { setMsg({ ok: false, text: e.message }); }
     setBusy(false);
   }

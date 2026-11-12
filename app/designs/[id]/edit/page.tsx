@@ -7,10 +7,10 @@ import Num from '@/components/Num';
 import Confirm from '@/components/Confirm';
 import { useDesign } from '@/lib/useDesign';
 import { api, fmt, fmt0, SHORT_MONTHS } from '@/lib/client';
-import { findModule, newBlock, uid } from '@/lib/catalog';
+import { findModule, findStructure, newBlock, STRUCTURE_BRAND, STRUCTURES, structureOf, uid } from '@/lib/catalog';
 import { blockLayout, blockSlots, boxPlan, blockYaw, designTotals, edgeLengths, pointInPoly, polyArea, polyCentre, polyPerimeter, ROOF_CLEARANCE, rad, shedAzimuth, shedRoofY, shedTopY, shedUnder, toWorld } from '@/lib/geometry';
 import { clockToSolar, dayOfYear, sunVector } from '@/lib/sun';
-import type { Block, Design, Keepout, ModuleSpec, Obstruction, Pt, Shed, Walkway } from '@/lib/types';
+import type { Block, Design, Keepout, ModuleSpec, Obstruction, Pt, Shed, StructureId, Walkway } from '@/lib/types';
 import type { DrawKind, Selection, Tool } from '@/lib/engine';
 
 const I = ({ d }: { d: string }) => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d={d} /></svg>;
@@ -83,8 +83,13 @@ function refit(d: Design, mods: ModuleSpec[], only?: string): Design {
       if (!b.shedId || (only && b.shedId !== only)) return b;
       const shed = d.sheds.find((s) => s.id === b.shedId);
       if (!shed) return b;
-      if (!((shed.tilt || 0) > 0)) return { ...b, mountHeight: r2(shed.height + ROOF_CLEARANCE) };
-      const nb: Block = { ...b, mounting: 'flush', tilt: shed.tilt!, azimuth: shed.slopeAz ?? 180 };
+      if (!((shed.tilt || 0) > 0)) return { ...b, roofRise: undefined, mountHeight: r2(shed.height + ROOF_CLEARANCE) };
+      if (b.ownTilt) { // keeps its own tilt and direction; every panel stands just clear of the sloped roof
+        const T = Math.tan((shed.tilt! * Math.PI) / 180), a = ((shed.slopeAz ?? 180) * Math.PI) / 180, gx = -Math.sin(a) * T, gz = Math.cos(a) * T;
+        const yaw = blockYaw(b.azimuth), c = Math.cos(yaw), s = Math.sin(yaw), r5 = (v: number) => Math.round(v * 1e5) / 1e5;
+        return { ...b, mounting: 'rows', roofRise: [r5(gx * c - gz * s), r5(gx * s + gz * c)], mountHeight: r2(shedRoofY(shed, b.x, b.z) + ROOF_CLEARANCE) };
+      }
+      const nb: Block = { ...b, roofRise: undefined, mounting: 'flush', tilt: shed.tilt!, azimuth: shed.slopeAz ?? 180 };
       const L = blockLayout(nb, findModule(mods, nb.moduleId));
       const [fx, fz] = toWorld(nb.x, nb.z, blockYaw(nb.azimuth), 0, L.depth / 2); // middle of the set's lowest edge
       return { ...nb, mountHeight: r2(shedRoofY(shed, fx, fz) + ROOF_CLEARANCE) };
@@ -95,7 +100,7 @@ function refit(d: Design, mods: ModuleSpec[], only?: string): Design {
 export default function Editor() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
-  const { design, setDesign, project, mods, error, stale, calculate, calcBusy, calcError } = useDesign(id);
+  const { design, setDesign, project, settings, mods, error, stale, calculate, calcBusy, calcError } = useDesign(id);
   const scene = useRef<SceneHandle>(null);
   const [sel, setSel] = useState<Selection>(null);
   const [multi, setMulti] = useState<Pick[]>([]); // Ctrl+click selection; used while nothing single is selected
@@ -126,7 +131,7 @@ export default function Editor() {
     if (!d || (!dirty.current && !withThumb)) return;
     dirty.current = false;
     setStatus('saving');
-    const body: any = { name: d.name, sheds: d.sheds, keepouts: d.keepouts, blocks: d.blocks, obstructions: d.obstructions, walkways: d.walkways, inverter: d.inverter, defaultModuleId: d.defaultModuleId, structureName: d.structureName };
+    const body: any = { name: d.name, sheds: d.sheds, keepouts: d.keepouts, blocks: d.blocks, obstructions: d.obstructions, walkways: d.walkways, inverter: d.inverter, defaultModuleId: d.defaultModuleId, structureName: d.structureName, defaultStructure: d.defaultStructure };
     if (withThumb) { try { body.thumb = scene.current?.engine()?.snapshot({ size: 480, quality: 0.72 }); } catch { /* picture is optional */ } }
     saving.current = api(`/api/designs/${id}`, 'PUT', body)
       .then(() => { if (!dirty.current) setStatus('saved'); })
@@ -203,7 +208,9 @@ export default function Editor() {
     const n = d.blocks.filter((b) => b.shedId === shed.id).length + 1;
     const [cx, cz] = polyCentre(shed.points);
     const inside = pointInPoly(cx, cz, shed.points);
-    const b: Block = { ...newBlock(d), name: `${shed.name} · set ${n}`, shedId: shed.id, azimuth: shedAzimuth(shed),
+    const nb = newBlock(d), sloped = (shed.tilt || 0) > 0;
+    const b: Block = { ...nb, name: `${shed.name} · set ${n}`, shedId: shed.id,
+      azimuth: nb.ownTilt && sloped ? ((shed.slopeAz ?? 180) + 180) % 360 : shedAzimuth(shed), // reverse tilt faces away from the roof slope
       x: r2(inside ? cx : shed.points[0][0]), z: r2(inside ? cz : shed.points[0][1]), mountHeight: r2(shed.height + ROOF_CLEARANCE) };
     apply(refit({ ...d, blocks: [...d.blocks, b] }, mods, shed.id));
     setSel({ kind: 'block', id: b.id }); setTool('select');
@@ -405,6 +412,7 @@ export default function Editor() {
       <div className="ed-top">
         <button className="ebtn" onClick={() => go(`/designs/${id}`)}>← Design summary</button>
         <span className="sep" />
+        {settings?.company.logo && <img className="top-logo" src={settings.company.logo} alt={settings.company.name} />}
         <span className="name">{project.name}</span><span style={{ color: 'var(--ed-muted)' }}>/ {design.name}</span>
         <span className="sep" />
         <button className="ebtn" onClick={undo} disabled={!past.current.length} title="Undo (Ctrl+Z)">↶ Undo</button>
@@ -507,7 +515,8 @@ export default function Editor() {
 
             <div className="ed-sec"><div className="t">Defaults for new panels</div>
               <div className="ef wide"><select className="eselect" value={design.defaultModuleId} onChange={(e) => apply({ ...design, defaultModuleId: e.target.value })}>{mods.map((m) => <option key={m.id} value={m.id}>{m.name} ({m.length} × {m.width} m)</option>)}</select></div>
-              <div className="ef wide"><label>Structure name for the report</label><input className="einput" value={design.structureName} onChange={(e) => apply({ ...design, structureName: e.target.value })} onKeyDown={(e) => e.stopPropagation()} /></div>
+              <div className="ef wide"><label>{STRUCTURE_BRAND} for new panel sets</label><select className="eselect" value={design.defaultStructure || 'minirail'} onChange={(e) => apply({ ...design, defaultStructure: e.target.value as StructureId })}>{STRUCTURES.map((s) => <option key={s.id} value={s.id}>{s.name} ({s.orientation}{s.tilt ? `, ${s.tilt}° tilt` : ''})</option>)}</select></div>
+              <div style={{ color: 'var(--ed-muted)', fontSize: 12 }}>Each panel set can use a different structure. Select a panel set to change it.</div>
             </div>
 
             <div className="ed-sec"><div className="t">Generation</div>
@@ -630,7 +639,17 @@ function BlockPanel({ b, design, mods, patch, onDuplicate, onDelete, onPanelsToo
   const m = findModule(mods, b.moduleId), S = blockSlots(b, m, design), L = S.L, n = S.active.length;
   const shed = b.shedId ? design.sheds.find((s) => s.id === b.shedId) : null;
   const removed = S.ghost.length;
-  const turn = (d: number) => patch({ azimuth: Math.round((((b.azimuth + d) % 360) + 360) % 360 * 100) / 100 });
+  const sloped = !!shed && (shed.tilt || 0) > 0, onRoof = sloped && !b.ownTilt, slopeAz = shed?.slopeAz ?? 180;
+  const st = structureOf(b);
+  // on a sloped shed, changing the tilt or direction lifts the set off the roof plane onto its own tilt
+  const own: Partial<Block> = sloped ? { ownTilt: true, mounting: 'rows' } : {};
+  const face = (a: number) => patch({ ...own, azimuth: Math.round((((a % 360) + 360) % 360) * 100) / 100 });
+  const turn = (d: number) => face(b.azimuth + d);
+  const setStructure = (id: StructureId) => {
+    const n = findStructure(id);
+    if (n.tilt) patch({ structure: id, orientation: n.orientation, mounting: 'rows', tilt: n.tilt, ownTilt: true, azimuth: sloped ? (slopeAz + 180) % 360 : b.azimuth });
+    else patch({ structure: id, orientation: n.orientation, ownTilt: false, ...(st.tilt && !sloped ? { mounting: 'flush' as const, tilt: 0 } : {}) });
+  };
   return (
     <>
       <Head name={b.name} onName={(name) => patch({ name })} onDuplicate={onDuplicate} onDelete={onDelete} />
@@ -645,9 +664,6 @@ function BlockPanel({ b, design, mods, patch, onDuplicate, onDelete, onPanelsToo
         <div className="ef wide"><select className="eselect" value={m.id} onChange={(e) => patch({ moduleId: e.target.value })}>{mods.map((x) => <option key={x.id} value={x.id}>{x.name} ({x.length} × {x.width} m)</option>)}</select></div>
         {<div className="ef"><label>Rows</label><Num value={b.rows} min={1} max={200} int onCommit={(v) => patch({ rows: v })} /></div>}
         {<div className="ef"><label>Columns</label><Num value={b.cols} min={1} max={400} int onCommit={(v) => patch({ cols: v })} /></div>}
-        <div className="ef"><label>Panel orientation</label>
-          <div className="eseg"><button className={b.orientation === 'portrait' ? 'on' : ''} onClick={() => patch({ orientation: 'portrait' })}>Portrait</button><button className={b.orientation === 'landscape' ? 'on' : ''} onClick={() => patch({ orientation: 'landscape' })}>Landscape</button></div>
-        </div>
       </div>
       <div className="ed-sec"><div className="t">Gaps</div>
         <div className="ef"><label>Gap between columns<small>side by side</small></label><Num value={b.gapH} min={0} max={20} step={0.005} unit="m" onCommit={(v) => patch({ gapH: v })} /></div>
@@ -657,35 +673,38 @@ function BlockPanel({ b, design, mods, patch, onDuplicate, onDelete, onPanelsToo
         <div className="ef"><label>Walkway gap after every<small>columns (0 = none)</small></label><Num value={b.aisleColsEvery} min={0} max={400} int onCommit={(v) => patch({ aisleColsEvery: v })} /></div>
         {b.aisleColsEvery > 0 && <div className="ef"><label>Column walkway gap</label><Num value={b.aisleColsGap} min={0} max={30} step={0.1} unit="m" onCommit={(v) => patch({ aisleColsGap: v })} /></div>}
       </div>
-      {shed && (shed.tilt || 0) > 0 ? (
-        <div className="ed-sec"><div className="t">Mounting</div>
-          <div className="kv"><span>Tilt</span><b>{fmt(b.tilt, 1)}° (shed roof)</b></div>
-          <div className="kv"><span>Facing direction</span><b>{fmt(b.azimuth, 1)}°</b></div>
-          <div style={{ color: 'var(--ed-muted)', fontSize: 12 }}>These panels lie on the sloped roof of {shed.name}. Change the roof tilt or direction on the shed.</div>
-        </div>
-      ) : (
-      <div className="ed-sec"><div className="t">Mounting</div>
-        <div className="ef wide"><select className="eselect" value={b.mounting} onChange={(e) => patch({ mounting: e.target.value as any })}>
-          <option value="flush">On a shed / sloped roof (one flat plane)</option>
-          <option value="rows">Tilted rows (flat roof or ground)</option>
+      <div className="ed-sec"><div className="t">Structure and tilt</div>
+        <div className="ef wide"><label>{STRUCTURE_BRAND}</label><select className="eselect" value={st.id} onChange={(e) => setStructure(e.target.value as StructureId)}>
+          {STRUCTURES.map((x) => <option key={x.id} value={x.id}>{x.name} ({x.orientation}{x.tilt ? `, ${x.tilt}° tilt` : ''})</option>)}
         </select></div>
-        <div className="ef"><label>Tilt</label><Num value={b.tilt} min={0} max={60} step={1} unit="°" onCommit={(v) => patch({ tilt: v })} /></div>
-        <div className="ef"><label>Facing direction<small>180° = south</small></label><Num value={b.azimuth} min={0} max={360} step={0.5} unit="°" onCommit={(v) => patch({ azimuth: v % 360 })} /></div>
+        <div className="kv"><span>Panel orientation</span><b>{b.orientation === 'portrait' ? 'Portrait' : 'Landscape'} (set by the structure)</b></div>
+        {!sloped && !st.tilt && <div className="ef wide"><select className="eselect" value={b.mounting} onChange={(e) => patch({ mounting: e.target.value as any })}>
+          <option value="flush">One flat plane</option>
+          <option value="rows">Every row tilted on its own</option>
+        </select></div>}
+        <div className="ef"><label>Panel tilt<small>{onRoof ? 'lying on the shed roof' : '0 = flat'}</small></label><Num value={b.tilt} min={0} max={60} step={0.5} unit="°" onCommit={(v) => patch({ ...own, tilt: v })} /></div>
+        <div className="ef"><label>Panels slope down towards<small>180° = south</small></label><Num value={b.azimuth} min={0} max={360} step={0.5} unit="°" onCommit={(v) => face(v)} /></div>
         <div className="eseg" style={{ marginBottom: 7 }}>
-          <button onClick={() => turn(-1)}>↺ 1°</button>
-          {[['N', 0], ['E', 90], ['S', 180], ['W', 270]].map(([l, a]) => <button key={l} className={b.azimuth === a ? 'on' : ''} onClick={() => patch({ azimuth: a as number })}>{l}</button>)}
-          <button onClick={() => turn(1)}>1° ↻</button>
+          {[['N', 0], ['E', 90], ['S', 180], ['W', 270]].map(([l, a]) => <button key={l} className={b.azimuth === a ? 'on' : ''} onClick={() => face(a as number)}>{l}</button>)}
         </div>
-        {shed && (
-          <div className="eseg" style={{ marginBottom: 7 }}>
-            <button onClick={() => patch({ azimuth: shedAzimuth(shed) })}>Line up with shed</button>
-            <button onClick={() => turn(90)}>Turn 90°</button>
-            <button onClick={() => turn(180)}>Flip</button>
-          </div>
+        <div className="eseg" style={{ marginBottom: 7 }}>
+          {shed && <button onClick={() => face(shedAzimuth(shed))}>Across long side</button>}
+          <button onClick={() => turn(90)}>Turn 90°</button>
+          <button onClick={() => turn(180)}>Flip</button>
+        </div>
+        {sloped && (
+          <>
+            <div className="eseg" style={{ marginBottom: 7 }}>
+              {!st.tilt && <button className={onRoof ? 'on' : ''} onClick={() => patch({ ownTilt: false })}>Lie on the roof</button>}
+              <button className={!onRoof && b.azimuth === (slopeAz + 180) % 360 ? 'on' : ''} onClick={() => face(slopeAz + 180)}>Reverse to the roof</button>
+            </div>
+            <div style={{ color: 'var(--ed-muted)', fontSize: 12 }}>{onRoof
+              ? `These panels lie on the roof of ${shed!.name} (${fmt(shed!.tilt || 0, 1)}° towards ${fmt(slopeAz, 1)}°). Change the tilt or direction here to give this set its own.`
+              : `This set has its own tilt, measured from level. The roof of ${shed!.name} slopes ${fmt(shed!.tilt || 0, 1)}° towards ${fmt(slopeAz, 1)}°; each panel stands just clear of it.`}</div>
+          </>
         )}
         {!shed && <div className="ef"><label>Height above ground<small>lowest panel edge</small></label><Num value={b.mountHeight} min={0} max={80} step={0.1} unit="m" onCommit={(v) => patch({ mountHeight: v })} /></div>}
       </div>
-      )}
       {(
         <div className="ed-sec"><div className="t">Position from the project pin</div>
           <div className="ef"><label>East</label><Num value={b.x} min={-2000} max={2000} step={0.1} unit="m" onCommit={(v) => patch({ x: v })} /></div>

@@ -1,11 +1,12 @@
 'use client';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import SceneView, { SceneHandle } from '@/components/SceneView';
 import { useDesign } from '@/lib/useDesign';
 import { fmt, fmt0, fmtDateTime, SHORT_MONTHS } from '@/lib/client';
 import { designTotals } from '@/lib/geometry';
+import { STRUCTURE_BRAND, structureOf } from '@/lib/catalog';
 import { clockToSolar, dayOfYear, sunVector } from '@/lib/sun';
 
 type Pics = { top: string; jun9: string; jun17: string; dec9: string; dec17: string; irr: string; access: string };
@@ -48,13 +49,46 @@ export default function Report() {
 
   if (!design || !project || !settings) return <div style={{ padding: 40 }}>{error ? <div className="error">{error} <Link href="/projects"><u>Back to projects</u></Link></div> : 'Preparing report…'}</div>;
   const t = designTotals(design, mods), r = design.results, co = settings.company;
-  const Foot = () => (
-    <div className="rp-foot">{co.logo ? <img src={co.logo} alt="" /> : <span className="mark" />}<span><b style={{ color: '#2a2f36' }}>{co.name}</b><br />Generated on {fmtDateTime(now)}</span></div>
+  const PAGES = 6;
+  const Brand = () => (co.logo ? <img src={co.logo} alt={co.name} /> : <span className="who"><span className="mark" />{co.name}</span>);
+  // one A4 portrait page: logo header, body, numbered footer
+  const page = (n: number, title: string, body: ReactNode) => (
+    <section className="rp" key={n}>
+      <header className="rp-head"><Brand /><div className="ctx"><b>{project.name}</b>{title}</div></header>
+      {body}
+      <footer className="rp-foot"><span>{co.name} · Generated on {fmtDateTime(now)}</span><span>Page {n} of {PAGES}</span></footer>
+    </section>
   );
-  const Img = ({ src }: { src?: string }) => (src ? <img src={src} alt="" /> : <div style={{ aspectRatio: '1', maxHeight: '125mm', background: '#dfe5ea', display: 'grid', placeItems: 'center', color: '#6b7a90' }}>Drawing…</div>);
-  const maxM = r ? Math.max(...r.monthly.map((m) => m.ac), 1) : 1;
-  const axisMax = Math.ceil(maxM / 10000) * 10000 || 1;
-  const maxIrr = r ? r.losses[0].value : 1, maxE = r ? (r.losses.find((l) => l.stage === 'dc')?.value || 1) : 1;
+  const Img = ({ src }: { src?: string }) => (src ? <img src={src} alt="" /> : <div style={{ aspectRatio: '1', background: '#dfe5ea', display: 'grid', placeItems: 'center', color: '#6b7a90', borderRadius: '2mm' }}>Drawing…</div>);
+  const fmtK = (v: number) => (v >= 10000 ? `${fmt(v / 1000, 1)}k` : fmt0(v));
+
+  // monthly chart (drawn in millimetres)
+  const acs = r ? r.monthly.map((m) => m.ac) : [];
+  const maxM = Math.max(...acs, 1), avgM = r ? r.annualAc / 12 : 0;
+  const pow = 10 ** Math.floor(Math.log10(maxM)), axisMax = Math.ceil(maxM / (pow / 2)) * (pow / 2);
+  const best = acs.indexOf(Math.max(...acs)), low = acs.indexOf(Math.min(...acs));
+  const CX = 14, CW = 164, CT = 6, CB = 54, band = CW / 12, bw = 9;
+  const cy = (v: number) => CB - (v / axisMax) * (CB - CT);
+  const bar = (i: number, v: number) => {
+    const x = CX + i * band + (band - bw) / 2, y = cy(v), q = Math.min(1.2, (CB - y) / 2);
+    return `M${x},${CB}V${y + q}Q${x},${y} ${x + q},${y}H${x + bw - q}Q${x + bw},${y} ${x + bw},${y + q}V${CB}Z`;
+  };
+  const sum = (k: 'direct' | 'diffuse' | 'effective' | 'dc' | 'ac') => (r ? r.monthly.reduce((a, m) => a + m[k], 0) : 0);
+
+  // energy flow
+  const irrRows = r ? r.losses.filter((l) => l.stage === 'irradiance') : [], elRows = r ? r.losses.filter((l) => l.stage !== 'irradiance') : [];
+  const ghi = irrRows[0]?.value || 0, onPanel = irrRows[irrRows.length - 1]?.value || 0, nom = elRows[0]?.value || 0, acOut = elRows[elRows.length - 1]?.value || 0;
+  const maxIrr = Math.max(...irrRows.map((l) => l.value), 1), maxE = Math.max(...elRows.map((l) => l.value), 1);
+  const lossRow = (l: (typeof irrRows)[number], i: number, max: number, col: string) => (
+    <div className={`rp-loss${l.pct === null ? ' start' : ''}`} key={i}>
+      <span>{l.label}</span>
+      <div className="track"><i style={{ width: `${Math.min((l.value / max) * 100, 100)}%`, background: col }} /></div>
+      <span className="num">{fmt0(l.value)} {l.unit}</span>
+      <span className="num">{l.pct === null ? 'Start' : Math.abs(l.pct) < 0.005 ? '0.00%' : `${l.pct > 0 ? '▲ +' : '▼ −'}${fmt(Math.abs(l.pct))}%`}</span>
+    </div>
+  );
+  const lossHead = (unit: string) => <div className="rp-loss head"><span>Step</span><span>Remaining</span><span className="num">{unit}</span><span className="num">Change</span></div>;
+  const blocks = design.blocks.filter((b) => r?.poaByBlock[b.id] !== undefined);
 
   return (
     <>
@@ -66,9 +100,9 @@ export default function Report() {
         <button className="btn primary" disabled={!r || !pics} onClick={() => window.print()}>⬇ Download PDF</button>
       </div>
       <div className="no-print" style={{ background: '#8792a2', padding: '14px 24px 0', display: 'flex', flexDirection: 'column', gap: 8, alignItems: 'center' }}>
-        {calcError && <div className="error" style={{ width: '297mm', maxWidth: '100%', margin: 0 }}>{calcError}</div>}
-        {r && stale && <div className="note" style={{ width: '297mm', maxWidth: '100%' }}>The layout changed after the last calculation. Press Recalculate so the report matches the layout.</div>}
-        {r && <div className="okmsg" style={{ width: '297mm', maxWidth: '100%' }}>“Download PDF” opens the print window. Choose <b>Save as PDF</b>, layout <b>Landscape</b>, paper <b>A4</b>, margins <b>None</b>, and tick <b>Background graphics</b>.</div>}
+        {calcError && <div className="error" style={{ width: '210mm', maxWidth: '100%', margin: 0 }}>{calcError}</div>}
+        {r && stale && <div className="note" style={{ width: '210mm', maxWidth: '100%' }}>The layout changed after the last calculation. Press Recalculate so the report matches the layout.</div>}
+        {r && <div className="okmsg" style={{ width: '210mm', maxWidth: '100%' }}>“Download PDF” opens the print window. Choose <b>Save as PDF</b>, layout <b>Portrait</b>, paper <b>A4</b>, margins <b>None</b>, and tick <b>Background graphics</b>.</div>}
       </div>
       {/* hidden canvas used only to draw the pictures */}
       <div className="no-print" style={{ position: 'fixed', left: -5000, top: 0, width: 800, height: 800 }}>
@@ -84,123 +118,137 @@ export default function Report() {
       ) : (
         <div className="report-wrap">
           {/* 1 cover */}
-          <section className="rp"><div className="rp-cover">
-            <div>
-              <h2>{project.name}</h2>
-              <p className="accent" style={{ fontSize: '15pt', maxWidth: '110mm' }}>{project.displayAddress || project.address}</p>
-              <div className="rp-big">{fmt(t.kwp)} kWp</div>
-              <p className="accent" style={{ fontSize: '12pt' }}>({project.lat.toFixed(5)} , {project.lng.toFixed(5)})</p>
-              <hr style={{ border: 0, borderTop: '1px solid #9aa5b1', margin: '6mm 0' }} />
-              <p>{t.modules} modules · {design.inverter.qty} inverter{design.inverter.qty === 1 ? '' : 's'} · {fmt(t.acKw)} kW AC</p>
-              <p style={{ marginTop: '22mm', fontSize: '13pt' }}>Prepared for: <b>{project.clientName}</b></p>
+          <section className="rp cover">
+            <div className="rp-cover-top">
+              {co.logo ? <img src={co.logo} alt={co.name} /> : <span className="who"><span className="mark" />{co.name}</span>}
+              <div className="tag"><b>Solar plant layout report</b>{fmtDateTime(now).split(' | ')[0]}</div>
             </div>
-            <div><Img src={pics?.top} /><div className="credit">{CREDIT}</div></div>
-          </div><Foot /></section>
-
-          {/* 2 metrics */}
-          <section className="rp"><div className="rp-split">
-            <h2>System Metrics</h2>
-            <div>
-              <div className="rp-metrics">
-                <div className="rp-metric" style={{ background: 'var(--ink)' }}><span>Annual production</span><b>{fmt(r.annualAc / 1000)}</b><small>x 1000 kWh (units)</small></div>
-                <div className="rp-metric" style={{ background: 'var(--teal)' }}><span>Performance ratio</span><b>{fmt(r.pr)}%</b><small>&nbsp;</small></div>
-                <div className="rp-metric" style={{ background: 'var(--sun)' }}><span>Specific generation</span><b>{fmt(r.specific)}</b><small>kWh/kWp/year</small></div>
-              </div>
-              <div className="rp-metrics" style={{ marginTop: '8mm' }}>
-                <div className="rp-box"><span>Module DC nameplate</span><b>{fmt(t.kwp)} kWp</b></div>
-                <div className="rp-box"><span>AC nameplate</span><b>{fmt(t.acKw)} kW</b></div>
-                <div className="rp-box"><span>DC-AC ratio</span><b>{t.acKw ? fmt(t.ratio) : '-'}</b></div>
-                <div className="rp-box"><span>Weather dataset</span><b>{r.source}</b></div>
-                <div className="rp-box"><span>Shadow-free time</span><b>{fmt(r.shadeFreePct)} %</b></div>
-                {t.shedArea > 0 && <div className="rp-box"><span>Shed roof area</span><b>{fmt(t.shedArea)} m²</b></div>}
-              </div>
+            <h1>{project.name}</h1>
+            <p className="rp-addr">{project.displayAddress || project.address} · {project.lat.toFixed(5)}, {project.lng.toFixed(5)}</p>
+            <div className="rp-hero"><Img src={pics?.top} /></div>
+            <div className="credit">{CREDIT}</div>
+            <div className="rp-strip">
+              <div><span>Plant capacity</span><b>{fmt(t.kwp)} <small>kWp</small></b></div>
+              <div><span>Solar modules</span><b>{fmt0(t.modules)}</b></div>
+              <div><span>Inverter capacity</span><b>{fmt(t.acKw)} <small>kW AC</small></b></div>
+              <div><span>Yearly generation</span><b>{fmt0(r.annualAc)} <small>kWh</small></b></div>
             </div>
-          </div><Foot /></section>
-
-          {/* 3 components */}
-          <section className="rp"><div className="rp-split">
-            <div><h2>Components</h2><p>Equipment used in this installation</p></div>
-            <div>
-              <div className="rp-comp"><div className="h">Modules</div>{t.byModule.map((m, i) => <div className="l" key={i}><span>{m.name}</span><span>{m.qty}</span></div>)}</div>
-              <div className="rp-comp"><div className="h">Inverters</div><div className="l"><span>{design.inverter.name || 'Inverter'} ({fmt(design.inverter.kw, 0)} kW)</span><span>{design.inverter.qty}</span></div></div>
-              <div className="rp-comp"><div className="h">Structure</div><div className="l"><span>{design.structureName || '-'}</span><span>-</span></div></div>
-              <div className="rp-comp"><div className="h">Walkways</div><div className="l"><span>{design.walkways.length ? `${design.walkways.length} walkway${design.walkways.length > 1 ? 's' : ''}` : 'None'}</span><span>{design.walkways.length ? `${fmt(t.walkwayLength)} m` : '-'}</span></div></div>
+            <div className="rp-by">
+              <div><span>Prepared for</span><b>{project.clientName || '-'}</b></div>
+              <div><span>Prepared by</span><b>{co.name}</b></div>
+              <div><span>Design</span><b>{design.name}</b></div>
             </div>
-          </div><Foot /></section>
-
-          {/* 4 annual production */}
-          <section className="rp" style={{ padding: 0 }}>
-            <div style={{ padding: '14mm 16mm', width: '118mm', height: '100%', display: 'flex', flexDirection: 'column' }}>
-              <h2>Expected Annual Production</h2>
-              <p style={{ marginTop: '6mm' }}>During the first year of operation, the system is expected to produce {fmt(r.annualAc / 1000)} x 1000 kWh.</p>
-              <div style={{ marginTop: 'auto' }}>
-                <p style={{ margin: 0 }}>Expected average generation</p><p className="accent" style={{ margin: '0 0 4mm', fontSize: '13pt' }}>{fmt(r.annualAc / 12)} kWh/month</p>
-                <p style={{ margin: 0 }}>Yearly degradation rate</p><p className="accent" style={{ margin: 0, fontSize: '13pt' }}>{settings.losses.degradation}%/year</p>
-              </div>
-            </div>
-            <div className="rp-dark" style={{ left: '118mm' }}>
-              <div style={{ textAlign: 'center', marginBottom: '4mm' }}>kWh (units) · scale 0 to {fmt0(axisMax)}</div>
-              {r.monthly.map((m, i) => <div className="rp-hbar" key={i}><span>{SHORT_MONTHS[i]}</span><div><i style={{ width: `${(m.ac / axisMax) * 100}%` }}>{fmt0(m.ac)}</i></div></div>)}
-            </div>
+            <footer className="rp-foot"><span>{co.name}{co.email ? ` · ${co.email}` : ''}{co.phone ? ` · ${co.phone}` : ''}</span><span>Page 1 of {PAGES}</span></footer>
           </section>
 
-          {/* 5 monthly table */}
-          <section className="rp">
-            <h2 style={{ marginBottom: '8mm' }}>Monthly Table</h2>
-            <table className="rp-table">
-              <thead><tr><th>Month</th><th>Direct irradiance, horizontal (kWh/m²)</th><th>Diffuse irradiance, horizontal (kWh/m²)</th><th>Effective irradiance on panels (kWh/m²)</th><th>DC energy (kWh)</th><th>AC energy (kWh)</th><th>Specific generation (kWh/kWp)</th><th>Performance ratio (%)</th></tr></thead>
-              <tbody>{r.monthly.map((m, i) => <tr key={i}><td>{m.month}</td><td>{fmt(m.direct)}</td><td>{fmt(m.diffuse)}</td><td>{fmt(m.effective)}</td><td>{fmt(m.dc)}</td><td>{fmt(m.ac)}</td><td>{fmt(m.specific)}</td><td>{fmt(m.pr)}</td></tr>)}</tbody>
+          {/* 2 summary */}
+          {page(2, 'System summary', <>
+            <h2>System summary</h2>
+            <p className="lead">The four numbers that describe how this plant is expected to perform in its first year.</p>
+            <div className="rp-kpis">
+              <div className="rp-kpi"><span>Yearly generation</span><b>{fmt0(r.annualAc)} <small>kWh (units)</small></b><p>Electricity delivered in year one. About {fmt0(r.annualAc / 12)} kWh a month, {fmt0(r.annualAc / 365)} kWh a day.</p></div>
+              <div className="rp-kpi"><span>Specific generation</span><b>{fmt0(r.specific)} <small>kWh per kWp a year</small></b><p>Units produced by each kWp installed. Use it to compare plants of different sizes.</p></div>
+              <div className="rp-kpi"><span>Performance ratio</span><b>{fmt(r.pr, 1)} <small>%</small></b><p>Share of the sunlight energy reaching the panels that ends up as usable electricity.</p></div>
+              <div className="rp-kpi"><span>Shadow-free time</span><b>{fmt(r.shadeFreePct, 1)} <small>%</small></b><p>Share of sun hours in the year when the panels are free of shadow.</p></div>
+            </div>
+            <h3>Plant details</h3>
+            <div className="rp-spec">
+              <div><span>DC capacity (modules)</span><b>{fmt(t.kwp)} kWp</b></div>
+              <div><span>AC capacity (inverters)</span><b>{fmt(t.acKw)} kW</b></div>
+              <div><span>DC to AC ratio</span><b>{t.acKw ? fmt(t.ratio) : '-'}</b></div>
+              <div><span>Yearly degradation</span><b>{settings.losses.degradation}% a year</b></div>
+              <div><span>Weather data</span><b>{r.source}</b></div>
+              {t.shedArea > 0 && <div><span>Shed roof area</span><b>{fmt(t.shedArea)} m²</b></div>}
+            </div>
+            <h3>Equipment</h3>
+            <table className="rp-table left">
+              <thead><tr><th>Item</th><th>Description</th><th>Quantity</th></tr></thead>
+              <tbody>
+                {t.byModule.map((m, i) => <tr key={i}><td className="key">{i === 0 ? 'Modules' : ''}</td><td>{m.name}</td><td>{fmt0(m.qty)}</td></tr>)}
+                <tr><td className="key">Inverters</td><td>{design.inverter.name || 'Inverter'} ({fmt(design.inverter.kw, 0)} kW)</td><td>{design.inverter.qty}</td></tr>
+                {t.byStructure.map((s, i) => <tr key={`s${i}`}><td className="key">{i === 0 ? 'Structure' : ''}</td><td>{s.name}</td><td>{fmt0(s.qty)} modules</td></tr>)}
+                <tr><td className="key">Walkways</td><td>{design.walkways.length ? `${design.walkways.length} walkway${design.walkways.length > 1 ? 's' : ''}` : 'None'}</td><td>{design.walkways.length ? `${fmt(t.walkwayLength)} m` : '-'}</td></tr>
+              </tbody>
             </table>
-            <Foot />
-          </section>
+          </>)}
 
-          {/* 6-7 shadows */}
-          <section className="rp"><h2>Shadow Analysis</h2>
-            <div className="rp-imgs"><figure><figcaption>June 21 | 9:00 AM</figcaption><Img src={pics?.jun9} /></figure><figure><figcaption>June 21 | 5:00 PM</figcaption><Img src={pics?.jun17} /></figure></div>
-            <div className="credit">{CREDIT}</div><Foot /></section>
-          <section className="rp"><h2>Shadow Analysis</h2>
-            <div className="rp-imgs" style={{ marginTop: '3mm' }}><figure><figcaption>December 21 | 9:00 AM</figcaption><Img src={pics?.dec9} /></figure><figure><figcaption>December 21 | 5:00 PM</figcaption><Img src={pics?.dec17} /></figure></div>
-            <p style={{ margin: '2mm 0 0' }}><b>Summary:</b> modules are shadow free for <b>{fmt(r.shadeFreePct)}%</b> of the sampled sun hours through the year (shadows from obstructions and other panel rows).</p>
-            <Foot /></section>
-
-          {/* 8 maps */}
-          <section className="rp">
-            <div className="rp-imgs" style={{ marginTop: 0 }}>
-              <figure><h2 style={{ marginBottom: '5mm' }}>Irradiance Map</h2><Img src={pics?.irr} /></figure>
-              <figure><h2 style={{ marginBottom: '5mm' }}>Solar Access</h2><Img src={pics?.access} /></figure>
+          {/* 3 monthly */}
+          {page(3, 'Monthly generation', <>
+            <h2>Monthly generation</h2>
+            <p className="lead">Expected electricity for each month of the first year, in kWh (units). The dashed line is the monthly average.</p>
+            <svg className="rp-chart" viewBox="0 0 178 60" role="img" aria-label="Monthly generation in kWh">
+              {[0, 0.25, 0.5, 0.75, 1].map((f) => <g key={f}><line className={f ? 'grid' : 'base'} x1={CX} x2={CX + CW} y1={cy(axisMax * f)} y2={cy(axisMax * f)} /><text x={CX - 1.5} y={cy(axisMax * f) + 0.9} textAnchor="end">{fmtK(axisMax * f)}</text></g>)}
+              {r.monthly.map((m, i) => <g key={i}><path className="bar" d={bar(i, m.ac)} /><text className="val" x={CX + i * band + band / 2} y={cy(m.ac) - 1.2} textAnchor="middle">{fmtK(m.ac)}</text><text x={CX + i * band + band / 2} y={CB + 4} textAnchor="middle">{SHORT_MONTHS[i]}</text></g>)}
+              <line className="avg" x1={CX} x2={CX + CW} y1={cy(avgM)} y2={cy(avgM)} />
+            </svg>
+            <div className="rp-kpis three" style={{ marginTop: '3mm' }}>
+              <div className="rp-kpi"><span>Best month</span><b>{r.monthly[best].month}</b><p>{fmt0(acs[best])} kWh</p></div>
+              <div className="rp-kpi"><span>Lowest month</span><b>{r.monthly[low].month}</b><p>{fmt0(acs[low])} kWh</p></div>
+              <div className="rp-kpi"><span>Monthly average</span><b>{fmt0(avgM)} <small>kWh</small></b><p>{fmt0(r.annualAc)} kWh in the year</p></div>
             </div>
-            <div className="credit">Yellow = highest yearly irradiance on the panels · green = shadow free. {CREDIT}</div><Foot /></section>
+            <h3>Month by month</h3>
+            <table className="rp-table">
+              <thead><tr><th>Month</th><th>Direct sun<small>kWh/m²</small></th><th>Diffuse sun<small>kWh/m²</small></th><th>On panels<small>kWh/m²</small></th><th>DC energy<small>kWh</small></th><th>AC energy<small>kWh</small></th><th>Specific<small>kWh/kWp</small></th><th>PR<small>%</small></th></tr></thead>
+              <tbody>{r.monthly.map((m, i) => <tr key={i}><td>{m.month}</td><td>{fmt(m.direct, 1)}</td><td>{fmt(m.diffuse, 1)}</td><td>{fmt(m.effective, 1)}</td><td>{fmt0(m.dc)}</td><td className="key">{fmt0(m.ac)}</td><td>{fmt(m.specific, 1)}</td><td>{fmt(m.pr, 1)}</td></tr>)}</tbody>
+              <tfoot><tr><td>Year</td><td>{fmt(sum('direct'), 1)}</td><td>{fmt(sum('diffuse'), 1)}</td><td>{fmt(sum('effective'), 1)}</td><td>{fmt0(sum('dc'))}</td><td>{fmt0(sum('ac'))}</td><td>{fmt(r.specific, 1)}</td><td>{fmt(r.pr, 1)}</td></tr></tfoot>
+            </table>
+          </>)}
 
-          {/* 9 losses */}
-          <section className="rp" style={{ padding: 0 }}>
-            <div className="rp-dark" style={{ left: 0, display: 'grid', gridTemplateColumns: '80mm 1fr', gap: '10mm' }}>
-              <div><h2 style={{ color: '#fff' }}>System Production Losses</h2><p style={{ marginTop: '6mm' }}>Loss in generation predicted due to environmental and electrical factors</p></div>
-              <div>
-                {r.losses.map((l, i) => {
-                  const w = l.stage === 'irradiance' ? (l.value / maxIrr) * 100 : (l.value / maxE) * 100;
-                  const col = l.stage === 'irradiance' ? '#fff' : l.stage === 'dc' ? '#4fb3d9' : '#f0a02e';
-                  return (
-                    <div className="rp-loss" key={i}>
-                      <span style={{ textAlign: 'right' }}>{fmt0(l.value)} {l.unit}</span>
-                      <div><div className="lab">{l.label}</div><div className="track"><i style={{ width: `${Math.min(w, 100)}%`, background: col }} /></div></div>
-                      <span>{l.pct === null ? '' : `${l.pct > 0 ? '+' : ''}${fmt(l.pct)}%`}</span>
-                    </div>
-                  );
-                })}
-                <div style={{ display: 'flex', gap: '8mm', justifyContent: 'center', marginTop: '4mm', fontSize: '9pt' }}>
-                  {[['#fff', 'Irradiance'], ['#4fb3d9', 'DC'], ['#f0a02e', 'AC']].map(([c, n]) => <span key={n}><i style={{ display: 'inline-block', width: '6mm', height: '3mm', background: c, marginRight: '2mm' }} />{n}</span>)}
-                </div>
-              </div>
+          {/* 4 shadows */}
+          {page(4, 'Shadow analysis', <>
+            <h2>Shadow analysis</h2>
+            <p className="lead">Where shadows fall on the longest and shortest days of the year, in the morning and the late afternoon.</p>
+            <div className="rp-imgs">
+              <figure><figcaption><b>21 June</b> · 9:00 AM</figcaption><Img src={pics?.jun9} /></figure>
+              <figure><figcaption><b>21 June</b> · 5:00 PM</figcaption><Img src={pics?.jun17} /></figure>
+              <figure><figcaption><b>21 December</b> · 9:00 AM</figcaption><Img src={pics?.dec9} /></figure>
+              <figure><figcaption><b>21 December</b> · 5:00 PM</figcaption><Img src={pics?.dec17} /></figure>
             </div>
-          </section>
+            <div className="credit">{CREDIT}</div>
+            <div className="rp-note">The modules are shadow free for <b>{fmt(r.shadeFreePct, 1)}%</b> of the sampled sun hours through the year. Shadows come from obstructions and from other panel rows.</div>
+          </>)}
 
-          {/* 10 thank you */}
-          <section className="rp"><div style={{ position: 'absolute', left: '165mm', top: '72mm' }}>
-            <h2 style={{ fontSize: '22pt' }}>Thank you</h2>
-            <p className="accent" style={{ fontSize: '18pt', margin: '5mm 0 3mm' }}>{co.name}</p>
-            <p style={{ fontSize: '14pt', margin: 0 }}>{co.email}</p><p style={{ fontSize: '14pt', margin: 0 }}>{co.phone}</p>
-            {!co.email && !co.phone && <p className="no-print muted small">Add your email and phone in Settings.</p>}
-          </div></section>
+          {/* 5 maps */}
+          {page(5, 'Sunlight on the panels', <>
+            <h2>Sunlight on the panels</h2>
+            <p className="lead">How much sunlight each panel receives over the year, and how much of the time it is free of shadow.</p>
+            <div className="rp-imgs">
+              <figure><figcaption><b>Irradiance map</b> · yellow = most sunlight</figcaption><Img src={pics?.irr} /></figure>
+              <figure><figcaption><b>Solar access</b> · green = shadow free</figcaption><Img src={pics?.access} /></figure>
+            </div>
+            <div className="credit">{CREDIT}</div>
+            {blocks.length > 0 && <>
+              <h3>Yearly sunlight by panel block</h3>
+              <table className="rp-table">
+                <thead><tr><th>Panel block</th><th>Structure<small>{STRUCTURE_BRAND}</small></th><th>Tilt<small>degrees</small></th><th>Facing<small>compass degrees</small></th><th>Sunlight on panels<small>kWh/m² a year</small></th></tr></thead>
+                <tbody>{blocks.slice(0, 12).map((b) => <tr key={b.id}><td>{b.name}</td><td>{structureOf(b).name}, {b.orientation}</td><td>{fmt(b.tilt, 1)}</td><td>{fmt0(b.azimuth)}</td><td className="key">{fmt0(r.poaByBlock[b.id])}</td></tr>)}</tbody>
+              </table>
+              {blocks.length > 12 && <div className="credit">and {blocks.length - 12} more panel blocks.</div>}
+            </>}
+          </>)}
+
+          {/* 6 losses */}
+          {page(6, 'Energy flow and losses', <>
+            <h2>Where the energy goes</h2>
+            <p className="lead">From sunlight on the site to electricity delivered. Each step shows what remains and how much that step changed it.</p>
+            <div className="rp-flow">
+              <div><span>Sunlight on site</span><b>{fmt0(ghi)}</b><small>kWh/m² a year</small></div>
+              <div><span>Reaches the panels</span><b>{fmt0(onPanel)}</b><small>kWh/m² a year</small></div>
+              <div><span>Panel output</span><b>{fmt0(nom)}</b><small>kWh before losses</small></div>
+              <div><span>Delivered</span><b>{fmt0(acOut)}</b><small>kWh · {nom ? fmt((acOut / nom) * 100, 1) : '-'}% of panel output</small></div>
+            </div>
+            <h3>1. Sunlight reaching the panels</h3>
+            {lossHead('kWh/m²')}
+            {irrRows.map((l, i) => lossRow(l, i, maxIrr, 'var(--sun)'))}
+            <h3>2. Electricity produced</h3>
+            {lossHead('kWh')}
+            {elRows.map((l, i) => lossRow(l, i, maxE, 'var(--teal)'))}
+            <div className="rp-contact">
+              {co.logo ? <img src={co.logo} alt="" /> : <span className="mark" />}
+              <div><b>{co.name}</b><p>Questions about this report? {[co.email, co.phone].filter(Boolean).join(' · ') || 'Contact us.'}</p>
+                {!co.email && !co.phone && <p className="no-print small">Add your email and phone in Settings.</p>}</div>
+            </div>
+          </>)}
         </div>
       )}
     </>

@@ -17,7 +17,7 @@ export default function CreateProject({ onClose }: { onClose: () => void }) {
   const set = (k: string, v: string) => setF((s) => ({ ...s, [k]: v }));
 
   async function place(lat: number, lng: number, label?: string) {
-    setPos({ lat, lng }); setMatches([]); setErr('');
+    setPos({ lat, lng }); setMatches([]); setMatchNote(''); setErr('');
     let address = label || '';
     if (!address) {
       try { address = (await api(`/api/geocode?lat=${lat}&lng=${lng}`)).address || ''; } catch { /* address stays as typed */ }
@@ -30,12 +30,18 @@ export default function CreateProject({ onClose }: { onClose: () => void }) {
     if (!t) { setErr('Paste a Google Maps link, coordinates, or type a place name.'); return; }
     setErr(''); setMatches([]); setMatchNote('');
     const direct = parseLatLng(t);
-    if (direct) return place(direct.lat, direct.lng);
+    if (direct && !direct.approx) return place(direct.lat, direct.lng);
     setBusy('find');
     try {
       if (/^https?:\/\//i.test(t)) {
         const r = await api('/api/maplink', 'POST', { text: t });
-        await place(r.lat, r.lng);
+        if (r.results) { // the link names a place but has no position: offer the map matches, never guess
+          setMatches(r.results);
+          setMatchNote(`This link has no exact position in it, only the name “${r.name}”. ${r.match === 'exact' ? 'These are the map matches for that name' : r.match === 'near' ? 'The exact place is not on the map; these are the nearest areas found' : 'Nothing in India has this name; these matches are in other countries'}: pick one, then drag the pin onto the roof. For an exact pin, copy the coordinates from Google Maps instead.`);
+        } else {
+          await place(r.lat, r.lng);
+          if (r.approx) setMatchNote('This link gives the centre of the map view, not an exact pin. Check the pin and drag it onto the roof.');
+        }
       } else {
         const r = await api(`/api/geocode?q=${encodeURIComponent(t)}`);
         if (!r.results.length) setErr('No place found with that name. Try a nearby town, or paste a Google Maps link.');
@@ -75,7 +81,7 @@ export default function CreateProject({ onClose }: { onClose: () => void }) {
                   <button className="btn dark" onClick={find} disabled={busy === 'find'}>{busy === 'find' ? 'Finding…' : 'Find'}</button>
                 </div>
               </div>
-              {matches.length > 0 && matchNote && <p className="muted small" style={{ margin: '0 0 6px' }}>{matchNote}</p>}
+              {matchNote && <p className="muted small" style={{ margin: '0 0 6px' }}>{matchNote}</p>}
               {matches.length > 0 && (
                 <div className="results-list">{matches.map((m, i) => <button key={i} onClick={() => place(m.lat, m.lng, m.label)}>{m.label}</button>)}</div>
               )}

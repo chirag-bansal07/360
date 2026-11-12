@@ -1,5 +1,5 @@
 import type { Block, Design, Keepout, ModuleSpec, Obstruction, Pt, Shed, Walkway } from './types';
-import { findModule } from './catalog';
+import { findModule, structureOf, STRUCTURE_BRAND } from './catalog';
 
 export const rad = (d: number) => (d * Math.PI) / 180;
 export const PANEL_THICK = 0.04;
@@ -23,6 +23,9 @@ export function blockLayout(b: Block, m: ModuleSpec): Layout {
   const rowOff = (r: number) => (flush ? r * (Lv + b.gapV) + rowExtra(r) : r * (Lv * Math.cos(t) + b.gapV) + rowExtra(r));
   const span = rowOff(rows - 1) + (flush ? Lv : Lv * Math.cos(t));
   const depth = flush ? span * Math.cos(t) : span;
+  // a set with its own tilt on a sloped roof: every panel is lifted just clear of the roof under it
+  const [ru, rv] = (!flush && b.roofRise) || [0, 0];
+  const lift = ((Lv * Math.cos(t)) / 2) * Math.abs(Math.tan(t) + rv) + (Lu / 2) * Math.abs(ru);
   const slots: Slot[] = [];
   let topY = 0;
   for (let r = 0; r < rows; r++) {
@@ -35,7 +38,7 @@ export function blockLayout(b: Block, m: ModuleSpec): Layout {
         ly = b.mountHeight + (span - s) * Math.sin(t);
       } else {
         lz = rowOff(r) + (Lv * Math.cos(t)) / 2 - span / 2;
-        ly = b.mountHeight + (Lv / 2) * Math.sin(t);
+        ly = b.mountHeight + lx * ru + lz * rv + lift;
       }
       topY = Math.max(topY, ly + (Lv / 2) * Math.sin(t));
       slots.push({ key: `${r}-${c}`, r, c, lx, ly, lz });
@@ -197,16 +200,19 @@ export const activeCount = (b: Block, m: ModuleSpec, d: { sheds?: Shed[]; keepou
 export function designTotals(d: Design, mods: ModuleSpec[]) {
   let modules = 0, kwp = 0;
   const byModule: Record<string, { name: string; qty: number }> = {};
+  const byStructure: Record<string, { name: string; qty: number }> = {};
   for (const b of d.blocks) {
     const m = findModule(mods, b.moduleId);
     const n = activeCount(b, m, d);
     modules += n; kwp += (n * m.watt) / 1000;
     byModule[m.id] = { name: m.name, qty: (byModule[m.id]?.qty || 0) + n };
+    const st = structureOf(b), sn = `${STRUCTURE_BRAND} · ${st.name} (${st.orientation}${st.tilt ? `, ${Math.round(b.tilt * 10) / 10}° tilt` : ''})`;
+    if (n) byStructure[sn] = { name: sn, qty: (byStructure[sn]?.qty || 0) + n };
   }
   const acKw = d.inverter.kw * d.inverter.qty;
   const walkwayLength = d.walkways.reduce((s, w) => s + w.l, 0);
   const shedArea = (d.sheds || []).reduce((s, sh) => s + polyArea(sh.points), 0);
-  return { modules, kwp, acKw, ratio: acKw > 0 ? kwp / acKw : 0, byModule: Object.values(byModule), walkwayLength, shedArea };
+  return { modules, kwp, acKw, ratio: acKw > 0 ? kwp / acKw : 0, byModule: Object.values(byModule), byStructure: Object.values(byStructure), walkwayLength, shedArea };
 }
 
 export function designBounds(d: Design, mods: ModuleSpec[]) {

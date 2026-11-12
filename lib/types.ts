@@ -1,5 +1,8 @@
 export type ModuleSpec = { id: string; name: string; watt: number; length: number; width: number; custom?: boolean };
 
+// Sunmount mounting structure a panel set sits on. It decides the panel orientation.
+export type StructureId = 'longrail' | 'monorail' | 'minirail' | 'reverse';
+
 export type Block = {
   id: string;
   name: string;
@@ -21,6 +24,9 @@ export type Block = {
   aisleColsGap: number;
   removed: string[]; // "row-col" keys of panels taken out by hand
   shedId?: string; // when set, the grid is fitted to this shed and confined to its outline
+  structure?: StructureId;
+  ownTilt?: boolean; // on a sloped shed: the set keeps its own tilt and direction instead of lying on the roof
+  roofRise?: [number, number]; // with ownTilt: how fast the roof under the set rises, per metre along a row and per metre towards the facing side
 };
 
 export type Pt = [number, number]; // [east, south] in metres
@@ -61,6 +67,7 @@ export type Design = {
   defaultModuleId: string;
   inverter: { name: string; kw: number; qty: number };
   structureName: string;
+  defaultStructure?: StructureId; // structure given to new panel sets
   sheds: Shed[];
   keepouts: Keepout[];
   blocks: Block[];

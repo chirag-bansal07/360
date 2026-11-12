@@ -1,4 +1,4 @@
-import type { ModuleSpec, Settings, Block, Design, LossSettings } from './types';
+import type { ModuleSpec, Settings, Block, Design, LossSettings, StructureId } from './types';
 
 // Generic module sizes. Add your own exact models in Settings.
 export const BUILTIN_MODULES: ModuleSpec[] = [
@@ -29,13 +29,25 @@ export function findModule(mods: ModuleSpec[], id: string): ModuleSpec {
   return mods.find((m) => m.id === id) || mods[0];
 }
 
+export const STRUCTURE_BRAND = 'Sunmount mounting structure';
+// tilt is set only for the structure that tilts the panels by itself
+export const STRUCTURES: { id: StructureId; name: string; orientation: Block['orientation']; tilt?: number }[] = [
+  { id: 'longrail', name: 'Long rail', orientation: 'landscape' },
+  { id: 'monorail', name: 'Mono rail', orientation: 'landscape' },
+  { id: 'minirail', name: 'Mini rail', orientation: 'portrait' },
+  { id: 'reverse', name: 'Reverse tilt', orientation: 'landscape', tilt: 15 },
+];
+export const findStructure = (id?: StructureId) => STRUCTURES.find((s) => s.id === id) || STRUCTURES[0];
+// Panel sets saved before structures existed are matched by their orientation.
+export const structureOf = (b: Block) => findStructure(b.structure || (b.orientation === 'portrait' ? 'minirail' : 'longrail'));
+
 export const uid = () => Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4);
 
 export function newBlock(design: Design, x = 0, z = 0): Block {
-  const n = design.blocks.length + 1;
+  const n = design.blocks.length + 1, st = findStructure(design.defaultStructure || 'minirail');
   return {
-    id: uid(), name: `Block ${n}`, x, z, azimuth: 180, rows: 4, cols: 10, orientation: 'portrait',
-    moduleId: design.defaultModuleId, mounting: 'flush', tilt: 5, mountHeight: 1,
+    id: uid(), name: `Block ${n}`, x, z, azimuth: 180, rows: 4, cols: 10, orientation: st.orientation, structure: st.id,
+    moduleId: design.defaultModuleId, mounting: st.tilt ? 'rows' : 'flush', tilt: st.tilt ?? 5, ownTilt: !!st.tilt, mountHeight: 1,
     gapH: 0.025, gapV: 0.025, aisleRowsEvery: 0, aisleRowsGap: 0.6, aisleColsEvery: 0, aisleColsGap: 0.6, removed: [],
   };
 }
