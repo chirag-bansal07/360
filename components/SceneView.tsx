@@ -13,6 +13,19 @@ type Props = {
 };
 export type SceneHandle = { engine: () => Engine | null };
 
+// The ground the satellite picture has to cover: a square centred on the middle of everything drawn (x east, z south of
+// the site point), wide enough for the layout plus 40 m around it, never less than 160 m and never more than 340 m.
+// An empty design gets 200 m around the site point.
+function groundArea(d: Design): { span: number; x: number; z: number } {
+  let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity;
+  const reach = (x: number, z: number, pad = 0) => { x0 = Math.min(x0, x - pad); x1 = Math.max(x1, x + pad); z0 = Math.min(z0, z - pad); z1 = Math.max(z1, z + pad); };
+  for (const s of [...d.sheds, ...d.keepouts]) for (const [x, z] of s.points) reach(x, z);
+  for (const b of d.blocks) reach(b.x, b.z, 25);
+  for (const o of [...d.obstructions, ...d.walkways]) reach(o.x, o.z, 5);
+  if (!isFinite(x0)) return { span: 200, x: 0, z: 0 };
+  return { span: Math.max(160, Math.min(340, Math.ceil(Math.max(x1 - x0, z1 - z0) + 80))), x: (x0 + x1) / 2, z: (z0 + z1) / 2 };
+}
+
 const SceneView = forwardRef<SceneHandle, Props>(function SceneView(p, ref) {
   const host = useRef<HTMLDivElement>(null);
   const eng = useRef<Engine | null>(null);
@@ -29,7 +42,7 @@ const SceneView = forwardRef<SceneHandle, Props>(function SceneView(p, ref) {
     import('@/lib/engine').then(({ Engine }) => {
       if (dead || !host.current) return;
       try {
-        const e = new Engine(host.current, { lat: p.lat, lng: p.lng, interactive: p.interactive, plain: p.plain, share: p.share, picture: p.picture }, {
+        const e = new Engine(host.current, { lat: p.lat, lng: p.lng, interactive: p.interactive, plain: p.plain, share: p.share, picture: p.picture, ground: groundArea(p.design) }, {
           onSelect: (s, add) => events.current.onSelect?.(s, add),
           onMove: (s, x, z) => events.current.onMove?.(s, x, z),
           canMove: (s, x, z) => events.current.canMove?.(s, x, z) ?? true,

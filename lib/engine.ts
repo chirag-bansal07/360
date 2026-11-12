@@ -120,7 +120,7 @@ export class Engine {
   private draw: null | { kind: DrawKind; pts: Pt[]; cursor: Pt | null } = null;
   private drawGroup = new THREE.Group();
 
-  constructor(private el: HTMLElement, private opts: { lat: number; lng: number; interactive: boolean; plain?: boolean; share?: string; picture?: 'auto' | 'solar' | 'tiles' }, private events: EngineEvents = {}) {
+  constructor(private el: HTMLElement, private opts: { lat: number; lng: number; interactive: boolean; plain?: boolean; share?: string; picture?: 'auto' | 'solar' | 'tiles'; ground?: { span: number; x: number; z: number } }, private events: EngineEvents = {}) {
     this.renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
     this.renderer.shadowMap.enabled = true;
@@ -193,9 +193,12 @@ export class Engine {
     } catch { /* keep default */ }
     if (this.disposed) return;
     const mpp = metresPerPixel(lat, zoom);
-    const n = Math.max(3, Math.min(16, Math.ceil(340 / (256 * mpp))));
+    // Only the ground the layout needs is loaded: "span" metres across, centred x metres east and z metres south of the
+    // site point (the middle of what is drawn). Every tile is a paid request.
+    const want = this.opts.ground || { span: 200, x: 0, z: 0 };
+    const n = Math.max(3, Math.min(16, Math.ceil(want.span / (256 * mpp))));
     const t = tileXY(lat, lng, zoom);
-    const x0 = Math.round(t.x - n / 2), y0 = Math.round(t.y - n / 2);
+    const x0 = Math.round(t.x + want.x / (256 * mpp) - n / 2), y0 = Math.round(t.y + want.z / (256 * mpp) - n / 2);
     // tiles are collected at their own size in "src", then enlarged and sharpened into the picture on the ground
     const up = Math.max(1, Math.min(3, Math.floor(4096 / (n * 256))));
     const src = document.createElement('canvas');
