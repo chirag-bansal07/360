@@ -116,7 +116,7 @@ export class Engine {
   private draw: null | { kind: DrawKind; pts: Pt[]; cursor: Pt | null } = null;
   private drawGroup = new THREE.Group();
 
-  constructor(private el: HTMLElement, private opts: { lat: number; lng: number; interactive: boolean; plain?: boolean }, private events: EngineEvents = {}) {
+  constructor(private el: HTMLElement, private opts: { lat: number; lng: number; interactive: boolean; plain?: boolean; share?: string }, private events: EngineEvents = {}) {
     this.renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
     this.renderer.shadowMap.enabled = true;
@@ -175,9 +175,10 @@ export class Engine {
       this.events.onImagery?.({ credit: 'No map · plain ground with a 5 m grid', warning: '', provider: 'none', zoom: 0 });
       return;
     }
+    const base = this.opts.share ? `/api/share/${this.opts.share}` : '/api'; // a shared link loads its pictures through the link
     let zoom = 18, provider = 'esri';
     try {
-      const info = await (await fetch(`/api/imagery?lat=${lat}&lng=${lng}`)).json();
+      const info = await (await fetch(`${base}/imagery?lat=${lat}&lng=${lng}`)).json();
       zoom = info.zoom || 18; provider = info.provider || 'esri';
       this.credit = info.credit || this.credit;
       this.events.onImagery?.({ credit: this.credit, warning: info.warning || '', provider, zoom });
@@ -213,7 +214,7 @@ export class Engine {
         const img = new Image();
         img.onload = () => { sg.drawImage(img, i * 256, j * 256, 256, 256); g.drawImage(img, i * 256 * up, j * 256 * up, 256 * up, 256 * up); tex.needsUpdate = true; this.dirty = true; resolve(); };
         img.onerror = () => resolve();
-        img.src = `/api/tile/${zoom}/${x0 + i}/${y0 + j}${provider === 'google' ? '?p=google' : ''}`;
+        img.src = `${base}/tile/${zoom}/${x0 + i}/${y0 + j}${provider === 'google' ? '?p=google' : ''}`;
       }));
     }
     await Promise.all(jobs);

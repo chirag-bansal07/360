@@ -1,4 +1,5 @@
 import { readDb, writeDb, json, fail } from '@/lib/store';
+import { removeProjectShares } from '@/lib/shares';
 
 export const dynamic = 'force-dynamic';
 type Ctx = { params: Promise<{ id: string }> };
@@ -35,5 +36,6 @@ export async function DELETE(_req: Request, ctx: Ctx) {
   db.projects = db.projects.filter((p) => p.id !== id);
   if (db.projects.length === before) return fail('Project not found.', 404);
   await writeDb(db);
+  await removeProjectShares(id);
   return json({ ok: true });
 }

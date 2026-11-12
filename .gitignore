@@ -13,3 +13,4 @@ docs/arka-walkthrough-notes.md
 .vercel
 .env*
 signup-code.txt
+data/shares.json

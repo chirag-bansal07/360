@@ -28,6 +28,11 @@ export function ensureSchema(): Promise<void> {
       await q`create table if not exists app_settings (key text primary key, value text not null)`;
       await q`create table if not exists workspaces (
         user_id text primary key references users(id) on delete cascade, data jsonb not null, updated_at timestamptz not null default now())`;
+      // share links: kind 'view' = live 3D link to a design, 'report' = a saved report with its own copy of the data
+      await q`create table if not exists shares (
+        token text primary key, user_id text not null references users(id) on delete cascade, kind text not null,
+        project_id text not null, design_id text not null, meta jsonb, data jsonb, created_at timestamptz not null default now())`;
+      await q`create index if not exists shares_owner on shares (user_id, project_id)`;
       await q`create table if not exists rate_limits (key text primary key, n int not null, reset_at timestamptz not null)`;
     })().catch((e) => { ready = null; throw e; });
   }

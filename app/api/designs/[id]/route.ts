@@ -1,4 +1,5 @@
 import { readDb, writeDb, findDesign, json, fail } from '@/lib/store';
+import { removeViewLink } from '@/lib/shares';
 
 export const dynamic = 'force-dynamic';
 type Ctx = { params: Promise<{ id: string }> };
@@ -43,5 +44,6 @@ export async function DELETE(_req: Request, ctx: Ctx) {
   if (!hit) return fail('Design not found.', 404);
   hit.project.designs.splice(hit.index, 1);
   await writeDb(db);
+  await removeViewLink(id);
   return json({ ok: true, projectId: hit.project.id });
 }

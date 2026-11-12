@@ -4,7 +4,8 @@ import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import Shell from '@/components/Shell';
 import Confirm from '@/components/Confirm';
-import { api, fmtDate, fmt } from '@/lib/client';
+import ShareDialog, { ShareIcon } from '@/components/ShareDialog';
+import { api, fmtDate, fmtDateTime, fmt, fmt0 } from '@/lib/client';
 import { allModules } from '@/lib/catalog';
 import { designTotals } from '@/lib/geometry';
 
@@ -16,8 +17,12 @@ export default function ProjectPage() {
   const [edit, setEdit] = useState<any>(null);
   const [del, setDel] = useState<any>(null);
   const [busy, setBusy] = useState(false);
+  const [reports, setReports] = useState<any[] | null>(null);
+  const [share, setShare] = useState<{ kind: 'view' | 'report'; url: string; name: string; designId?: string } | null>(null);
+  const [delReport, setDelReport] = useState<any>(null);
+  const loadReports = () => api(`/api/projects/${id}/reports`).then((r) => setReports(r.reports)).catch((e) => setErr(e.message));
   const load = () => api(`/api/projects/${id}`).then(setData).catch((e) => setErr(e.message));
-  useEffect(() => { load(); }, [id]);
+  useEffect(() => { load(); loadReports(); }, [id]);
 
   if (!data) return <Shell>{err ? <div className="error">{err} <Link href="/projects"><u>Back to projects</u></Link></div> : <p className="muted">Loading…</p>}</Shell>;
   const p = data.project, mods = allModules(data.settings);
@@ -32,6 +37,18 @@ export default function ProjectPage() {
       if (copyFrom) load(); else router.push(`/designs/${r.design.id}/edit`);
     } catch (e: any) { setErr(e.message); }
     setBusy(false);
+  }
+  async function shareDesign(d: any) {
+    try {
+      const r = await api(`/api/designs/${d.id}/share`, 'POST');
+      setErr(''); setShare({ kind: 'view', url: `${window.location.origin}/view/${r.token}`, name: d.name, designId: d.id });
+    } catch (e: any) { setErr(e.message); }
+  }
+  async function stopShare() {
+    try { await api(`/api/designs/${share!.designId}/share`, 'DELETE'); setShare(null); } catch (e: any) { setErr(e.message); setShare(null); }
+  }
+  async function removeReport() {
+    try { await api(`/api/reports/${delReport.token}`, 'DELETE'); setDelReport(null); loadReports(); } catch (e: any) { setErr(e.message); setDelReport(null); }
   }
   async function removeDesign() {
     try { await api(`/api/designs/${del.id}`, 'DELETE'); setDel(null); load(); } catch (e: any) { setErr(e.message); setDel(null); }
@@ -66,9 +83,10 @@ export default function ProjectPage() {
             return (
               <div className="design-card" key={d.id}>
                 <Link href={`/designs/${d.id}`}><div className="pic" style={d.thumb ? { backgroundImage: `url(${d.thumb})` } : undefined}>{!d.thumb && 'Empty design'}</div></Link>
-                <div className="foot">
+                <div className="foot" style={{ flexDirection: 'column', alignItems: 'stretch' }}>
                   <Link href={`/designs/${d.id}`}><b>{d.name}</b><div className="muted small">{t.modules ? `${fmt(t.kwp)} kWp · ${t.modules} modules` : 'No panels yet'}</div></Link>
-                  <div className="row" style={{ gap: 4 }}>
+                  <div className="row" style={{ gap: 4, justifyContent: 'flex-end', flexWrap: 'nowrap' }}>
+                    <button className="icon-btn" title="Share the 3D model link" aria-label={`Share the 3D model link of ${d.name}`} onClick={() => shareDesign(d)}><ShareIcon /></button>
                     <Link className="icon-btn" title="Edit design" href={`/designs/${d.id}/edit`}>✎</Link>
                     <button className="icon-btn" title="Duplicate design" disabled={busy} onClick={() => addDesign(d.id)}>⧉</button>
                     <button className="icon-btn danger" title="Delete design" onClick={() => setDel(d)}>🗑</button>
@@ -81,6 +99,40 @@ export default function ProjectPage() {
         </div>
       </div>
 
+      <div className="card">
+        <div className="card-head">Reports</div>
+        {!reports ? <div className="card-body muted">Loading…</div> : reports.length === 0 ? (
+          <div className="card-body empty">No reports yet. Open a design, press <b>Report (PDF)</b>, then <b>Download PDF</b> or <b>Share</b>. Every report made that way is listed here.</div>
+        ) : (
+          <div style={{ overflowX: 'auto' }}>
+            <table className="table">
+              <thead><tr><th>Design</th><th>Created</th><th>Plant size</th><th>Yearly generation</th><th /></tr></thead>
+              <tbody>
+                {reports.map((r) => (
+                  <tr key={r.token}>
+                    <td><b>{r.designName}</b></td>
+                    <td>{fmtDateTime(r.createdAt)}</td>
+                    <td>{fmt(r.kwp)} kWp · {r.modules} modules</td>
+                    <td>{fmt0(r.annualAc)} kWh</td>
+                    <td>
+                      <div className="row" style={{ gap: 6, justifyContent: 'flex-end', flexWrap: 'nowrap' }}>
+                        <a className="btn sm" href={`/report/${r.token}`} target="_blank" rel="noopener noreferrer">Open</a>
+                        <button className="btn sm primary" onClick={() => setShare({ kind: 'report', url: `${window.location.origin}/report/${r.token}`, name: r.designName })}><ShareIcon /> Share PDF</button>
+                        <button className="icon-btn danger" title="Delete report" aria-label={`Delete the report of ${r.designName}`} onClick={() => setDelReport(r)}>🗑</button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {share && (share.kind === 'view'
+        ? <ShareDialog title={`Share 3D model · ${share.name}`} url={share.url} text={`${p.name}: 3D solar plant layout`} note="Anyone with this link can open the 3D model and move around it. No sign-in is needed and nothing can be changed. The link always shows the design as it is now." onClose={() => setShare(null)} onOff={stopShare} />
+        : <ShareDialog title={`Share report · ${share.name}`} url={share.url} text={`${p.name}: solar plant layout report`} note="Anyone with this link can open the report and save it as a PDF with its Download PDF button. No sign-in is needed. The report stays as it was when it was created." onClose={() => setShare(null)} />)}
+      {delReport && <Confirm title="Delete report?" text={`The report of “${delReport.designName}” from ${fmtDateTime(delReport.createdAt)} will be deleted, and its link will stop working. This cannot be undone.`} action="Delete report" onYes={removeReport} onNo={() => setDelReport(null)} />}
       {edit && (
         <div className="modal-back" onMouseDown={(e) => e.target === e.currentTarget && setEdit(null)}>
           <div className="modal" style={{ width: 'min(560px,100%)' }}>

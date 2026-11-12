@@ -4,7 +4,8 @@ import { sessionVersion } from '@/lib/pg';
 
 // Guards every page and the data API.
 //  - On this computer: requests must be addressed to a local host name (stops DNS-rebinding from other sites).
-//  - Hosted: every page and API call needs a valid sign-in, except the sign-in page and its API.
+//  - Hosted: every page and API call needs a valid sign-in, except the sign-in page and its API,
+//    and shared links (/view, /report and /api/share), which are opened by people without an account.
 //  - Always: changes (POST / PUT / DELETE) must come from the app's own pages (stops other sites from changing data).
 // Extra local host names can be allowed with SUNCRAFT_HOSTS="name1,name2".
 const LOCAL = ['localhost', '127.0.0.1', '[::1]'];
@@ -31,6 +32,8 @@ export async function proxy(req: NextRequest) {
   }
 
   if (HOSTED) {
+    const shared = pathname.startsWith('/view/') || pathname.startsWith('/report/') || pathname.startsWith('/api/share/');
+    if (shared) return NextResponse.next();
     const open = pathname === '/login' || pathname.startsWith('/api/auth/');
     let signedIn = false;
     try {

@@ -4,7 +4,7 @@ import type { Design, ModuleSpec, Results } from '@/lib/types';
 import type { ColorMode, DrawKind, Engine, EngineEvents, Selection, Tool } from '@/lib/engine';
 
 type Props = {
-  lat: number; lng: number; interactive: boolean; plain?: boolean;
+  lat: number; lng: number; interactive: boolean; plain?: boolean; share?: string;
   design: Design; mods: ModuleSpec[]; results: Results | null;
   view: '2d' | '3d'; tool: Tool; selected?: Selection; also?: NonNullable<Selection>[];
   sun?: [number, number, number] | null; colorMode?: ColorMode;
@@ -28,7 +28,7 @@ const SceneView = forwardRef<SceneHandle, Props>(function SceneView(p, ref) {
     import('@/lib/engine').then(({ Engine }) => {
       if (dead || !host.current) return;
       try {
-        const e = new Engine(host.current, { lat: p.lat, lng: p.lng, interactive: p.interactive, plain: p.plain }, {
+        const e = new Engine(host.current, { lat: p.lat, lng: p.lng, interactive: p.interactive, plain: p.plain, share: p.share }, {
           onSelect: (s, add) => events.current.onSelect?.(s, add),
           onMove: (s, x, z) => events.current.onMove?.(s, x, z),
           canMove: (s, x, z) => events.current.canMove?.(s, x, z) ?? true,

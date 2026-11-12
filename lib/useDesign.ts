@@ -5,24 +5,26 @@ import { allModules } from './catalog';
 import { designSignature } from './geometry';
 import type { Design, Project, Results, Settings } from './types';
 
-// Loads one design with its project and settings.
-export function useDesign(id: string) {
+// Loads one design with its project and settings. With "share" it loads what a shared link shows instead.
+export function useDesign(id: string | undefined, share?: string) {
   const [design, setDesign] = useState<Design | null>(null);
   const [project, setProject] = useState<Omit<Project, 'designs'> | null>(null);
   const [settings, setSettings] = useState<Settings | null>(null);
   const [error, setError] = useState('');
   const [calcBusy, setCalcBusy] = useState(false);
   const [calcError, setCalcError] = useState('');
+  const [sharedAt, setSharedAt] = useState('');
 
   useEffect(() => {
-    api(`/api/designs/${id}`).then((r) => { setDesign(r.design); setProject(r.project); setSettings(r.settings); }).catch((e) => setError(e.message));
-  }, [id]);
+    api(share ? `/api/share/${share}` : `/api/designs/${id}`).then((r) => { setDesign(r.design); setProject(r.project); setSettings(r.settings); setSharedAt(r.createdAt || ''); }).catch((e) => setError(e.message));
+  }, [id, share]);
 
   const mods = useMemo(() => allModules(settings), [settings]);
   const stale = !!design?.results && design.results.signature !== designSignature(design);
 
   // beforeCalc lets the editor finish saving first
   const calculate = useCallback(async (beforeCalc?: () => Promise<void>) => {
+    if (!id) return null;
     setCalcBusy(true); setCalcError('');
     try {
       if (beforeCalc) await beforeCalc();
@@ -32,5 +34,5 @@ export function useDesign(id: string) {
     } catch (e: any) { setCalcError(e.message); return null; } finally { setCalcBusy(false); }
   }, [id]);
 
-  return { design, setDesign, project, settings, mods, error, stale, calculate, calcBusy, calcError };
+  return { design, setDesign, project, settings, mods, error, stale, calculate, calcBusy, calcError, sharedAt };
 }

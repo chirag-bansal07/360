@@ -40,6 +40,14 @@ export async function readDb(): Promise<Db> {
   }
 }
 
+// A named user's workspace, for shared links (the visitor is not signed in).
+export async function readDbOf(userId: string): Promise<Db> {
+  if (!HOSTED) return readDb();
+  await ensureSchema();
+  const rows = (await sql()`select data from workspaces where user_id = ${userId}`) as any[];
+  return rows.length ? normalise(rows[0].data as Db) : empty();
+}
+
 export async function writeDb(db: Db): Promise<void> {
   if (HOSTED) {
     const userId = await requireUserId();
@@ -58,6 +66,11 @@ export async function writeDb(db: Db): Promise<void> {
 // Google Maps key for sharper imagery. Hosted: one key for the whole app, set by the admin. Local: in the settings file.
 export async function getGoogleKey(): Promise<string> {
   if (HOSTED) { await requireUserId(); return getAppSetting('googleMapsKey'); }
+  return (await readDb()).settings.googleMapsKey || '';
+}
+// The same key without a sign-in check, for shared links. It is used on the server only and never sent to a page.
+export async function getGoogleKeyOpen(): Promise<string> {
+  if (HOSTED) return getAppSetting('googleMapsKey');
   return (await readDb()).settings.googleMapsKey || '';
 }
 export async function setGoogleKey(value: string): Promise<void> {
