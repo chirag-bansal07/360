@@ -106,6 +106,7 @@ async function fetchFromGoogle(lat: number, lng: number, key: string): Promise<{
   return { meta, jpeg: await pic.jpeg({ quality: 88 }).toBuffer() };
 }
 
+const failed = new Map<string, number>(); // sites where Google just failed: not tried again (and not counted again) for ten minutes
 const running = new Map<string, Promise<{ meta: SolarPic; jpeg: Buffer | null }>>(); // one paid request per site, even when several screens ask at once
 
 // The picture's position and date. The first call for a site fetches it from Google (a few seconds) and keeps it.
@@ -119,8 +120,8 @@ export async function solarInfo(lat: number, lng: number, key: string, mayFetch?
   if (!key || !mayFetch) return null;
   let job = running.get(k);
   if (!job) {
-    if (!(await mayFetch())) return null;
-    job = fetchFromGoogle(lat, lng, key).then(async (r) => { await keep(k, r.meta, r.jpeg); return r; }).finally(() => running.delete(k));
+    if ((failed.get(k) || 0) > Date.now() || !(await mayFetch())) return null;
+    job = fetchFromGoogle(lat, lng, key).then(async (r) => { await keep(k, r.meta, r.jpeg); return r; }).catch((e) => { if (failed.size > 2000) failed.clear(); failed.set(k, Date.now() + 600000); throw e; }).finally(() => running.delete(k));
     running.set(k, job);
   }
   const r = await job;
