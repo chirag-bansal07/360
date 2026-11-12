@@ -12,6 +12,8 @@ import { ensureSchema, sql } from './pg';
 // dark = Google's picture was taken in poor light; it is kept brightened, and is not used unless the project asks for it.
 export type SolarPic = { sizeE: number; sizeN: number; dx: number; dz: number; rot: number; date: string; quality: string; none?: boolean; dark?: boolean };
 
+export const NEW_SITES_PER_DAY = 40; // paid fetches one login may cause in a day, through its own screens and its shared links together
+
 const DIR = path.join(process.cwd(), 'data', 'solar');
 const keyOf = (lat: number, lng: number) => `${lat.toFixed(5)},${lng.toFixed(5)}`;
 const fileOf = (k: string) => path.join(DIR, k.replace(',', '_'));

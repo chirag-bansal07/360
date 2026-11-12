@@ -17,7 +17,7 @@ import { designTotals } from './geometry';
 export type ReportMeta = { designName: string; kwp: number; modules: number; annualAc: number; stamp: string };
 export type ReportItem = { token: string; designId: string; createdAt: string } & ReportMeta;
 type Row = { token: string; userId: string; kind: 'view' | 'report'; projectId: string; designId: string; meta: ReportMeta | null; data: any; createdAt: string };
-export type Shared = { kind: 'view' | 'report'; createdAt: string; design: Design; project: Omit<Project, 'designs'>; settings: Settings };
+export type Shared = { kind: 'view' | 'report'; createdAt: string; ownerId: string; design: Design; project: Omit<Project, 'designs'>; settings: Settings };
 
 const FILE = path.join(process.cwd(), 'data', 'shares.json');
 const TOKEN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -159,20 +159,21 @@ async function findRow(token: string): Promise<Row | null> {
 export async function openShare(token: string): Promise<Shared | null> {
   const row = await findRow(token);
   if (!row) return null;
-  if (row.kind === 'report') return { kind: 'report', createdAt: row.createdAt, ...row.data };
+  if (row.kind === 'report') return { kind: 'report', createdAt: row.createdAt, ownerId: row.userId, ...row.data };
   const db: Db = await readDbOf(row.userId);
   const hit = findDesign(db, row.designId);
   if (!hit) return null; // the design was deleted
-  return { kind: 'view', createdAt: row.createdAt, ...publicCopy(hit.project, hit.design, db.settings, false) };
+  return { kind: 'view', createdAt: row.createdAt, ownerId: row.userId, ...publicCopy(hit.project, hit.design, db.settings, false) };
 }
 
 // Where a link's site is, for the map pictures. Remembered for a minute so a page of tiles is one lookup.
-const cache = new Map<string, { at: number; spot: { lat: number; lng: number } | null }>();
-export async function shareSpot(token: string): Promise<{ lat: number; lng: number } | null> {
+// ownerId = the login the link belongs to: paid picture fetches caused through the link count against that login.
+const cache = new Map<string, { at: number; spot: { lat: number; lng: number; ownerId: string } | null }>();
+export async function shareSpot(token: string): Promise<{ lat: number; lng: number; ownerId: string } | null> {
   const hit = cache.get(token);
   if (hit && Date.now() - hit.at < 60000) return hit.spot;
   const s = await openShare(token);
-  const spot = s && !s.project.noMap ? { lat: s.project.lat, lng: s.project.lng } : null;
+  const spot = s && !s.project.noMap ? { lat: s.project.lat, lng: s.project.lng, ownerId: s.ownerId } : null;
   if (cache.size > 2000) cache.clear();
   cache.set(token, { at: Date.now(), spot });
   return spot;

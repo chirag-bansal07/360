@@ -3,10 +3,9 @@ import { pickImagery } from '@/lib/imagery';
 import { HOSTED } from '@/lib/session';
 import { requireUserId } from '@/lib/auth';
 import { allow } from '@/lib/pg';
+import { NEW_SITES_PER_DAY } from '@/lib/solar';
 
 export const dynamic = 'force-dynamic';
-
-const NEW_SITES_PER_DAY = 40; // paid Google Solar API fetches one login may cause in a day
 
 export async function GET(req: Request) {
   const u = new URL(req.url);
