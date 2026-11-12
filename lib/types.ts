@@ -34,7 +34,10 @@ export type Pt = [number, number]; // [east, south] in metres
 export type Shed = { id: string; name: string; points: Pt[]; height: number; setback: number; tilt?: number; slopeAz?: number };
 export type Keepout = { id: string; name: string; points: Pt[] };
 
-export type Obstruction = { id: string; name: string; x: number; z: number; w: number; l: number; h: number; rotation: number };
+// type: what the obstruction is. A skylight is a clear roof sheet, a fan is a roof exhaust fan (turbo ventilator),
+// custom (or none, for older designs) is a plain box.
+export type ObstructionType = 'skylight' | 'fan' | 'custom';
+export type Obstruction = { id: string; name: string; x: number; z: number; w: number; l: number; h: number; rotation: number; type?: ObstructionType };
 export type Walkway = { id: string; name: string; x: number; z: number; w: number; l: number; h: number; rotation: number };
 
 export type MonthRow = {

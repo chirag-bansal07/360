@@ -188,6 +188,9 @@ label.small { display: block; margin-bottom: .25rem; }
 .tool:active { transform: scale(.95); background: rgba(255, 255, 255, .12); }
 .tool.on { background: rgba(240, 140, 0, .2); color: #ffb340; }
 .tool:disabled { opacity: .35; cursor: not-allowed; transform: none; }
+.tool-sub { display: flex; flex-direction: column; gap: .1875rem; padding: 0 .125rem .25rem; }
+.tool-sub button { border: 1px solid var(--ed-line); background: transparent; color: var(--ed-text); border-radius: var(--r-m); padding: .375rem .25rem; font-size: .75rem; font-weight: 500; cursor: pointer; transition: background-color .15s ease-out; }
+.tool-sub button:hover { background: rgba(127, 127, 127, .18); }
 .tools-label { font-size: .6875rem; font-weight: 600; letter-spacing: .02em; color: var(--ed-muted); padding: .625rem .375rem .125rem; }
 .ed-canvas { position: relative; min-width: 0; min-height: 0; overflow: hidden; }
 .scene { position: absolute; inset: 0; }

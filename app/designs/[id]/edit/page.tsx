@@ -11,7 +11,7 @@ import { findModule, findStructure, newBlock, STRUCTURE_BRAND, STRUCTURES, struc
 import { blockLayout, blockSlots, boxPlan, blockYaw, designTotals, edgeLengths, pointInPoly, polyArea, polyCentre, polyPerimeter, ROOF_CLEARANCE, rad, shedAzimuth, shedRoofY, shedTopY, shedUnder, toWorld } from '@/lib/geometry';
 import { footprint, freeSpot, moveError, overlapError, shedError, type Foot } from '@/lib/placement';
 import { clockToSolar, dayOfYear, sunVector } from '@/lib/sun';
-import type { Block, Design, Keepout, ModuleSpec, Obstruction, Pt, Shed, StructureId, Walkway } from '@/lib/types';
+import type { Block, Design, Keepout, ModuleSpec, Obstruction, ObstructionType, Pt, Shed, StructureId, Walkway } from '@/lib/types';
 import type { DrawKind, Selection, Tool } from '@/lib/engine';
 
 const I = ({ d }: { d: string }) => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d={d} /></svg>;
@@ -99,6 +99,7 @@ export default function Editor() {
   const [draw, setDraw] = useState<DrawKind | null>(null);
   const [drawInfo, setDrawInfo] = useState<{ points: Pt[]; cursor: Pt | null } | null>(null);
   const [notice, setNotice] = useState('');
+  const [obMenu, setObMenu] = useState(false); // the three kinds under "Add obstruction" (commercial projects)
   const [sunOn, setSunOn] = useState(false);
   const [month, setMonth] = useState(5);
   const [hour, setHour] = useState(12);
@@ -225,14 +226,19 @@ export default function Editor() {
     setNotice('All panels removed from this shed. The outline is kept.');
   };
 
-  const addObstruction = () => {
+  const addObstruction = (type: ObstructionType = 'custom') => {
+    setObMenu(false);
     const d = latest.current!; const c = centre();
     // with a shed (or one of its panel sets) selected, the obstruction starts on that roof
     const sid = sel?.kind === 'shed' ? sel.id : sel?.kind === 'block' ? d.blocks.find((b) => b.id === sel.id)?.shedId : d.sheds.length === 1 ? d.sheds[0].id : '';
     const on = d.sheds.find((q) => q.id === sid) || shedUnder(d, c.x, c.z);
     const at = on ? polyCentre(on.points) : [c.x, c.z];
-    const o: Obstruction = { id: uid(), name: `Obstruction ${d.obstructions.length + 1}`, x: r2(at[0]), z: r2(at[1]), w: 2, l: 2, h: on ? 1 : 2, rotation: on ? (shedAzimuth(on) + 90) % 180 : 0 };
-    if (on) setNotice(`Obstruction placed on the roof of ${on.name}. Drag it into place; it stands on the roof and follows its tilt.`);
+    const label = type === 'skylight' ? 'Skylight' : type === 'fan' ? 'Exhaust fan' : 'Obstruction';
+    const count = d.obstructions.filter((q) => (q.type || 'custom') === type).length + 1;
+    // skylight: a clear roof sheet 1 m wide and 3 m long, running down the slope; exhaust fan: 0.6 m across and 0.6 m tall
+    const size = type === 'skylight' ? { w: 3, l: 1, h: 0.05 } : type === 'fan' ? { w: 0.6, l: 0.6, h: 0.6 } : { w: 2, l: 2, h: on ? 1 : 2 };
+    const o: Obstruction = { id: uid(), name: `${label} ${count}`, type, x: r2(at[0]), z: r2(at[1]), ...size, rotation: on ? (shedAzimuth(on) + 90) % 180 : 0 };
+    if (on) setNotice(`${label} placed on the roof of ${on.name}. Drag it into place; it ${type === 'skylight' ? 'lies' : 'stands'} on the roof and follows its tilt.`);
     const placed = settle({ ...d, obstructions: [...d.obstructions, o] }, { kind: 'obstruction', id: o.id });
     if (placed.crowded) setNotice(CROWDED);
     apply(placed.design); setSel({ kind: 'obstruction', id: o.id }); setTool('select');
@@ -459,8 +465,15 @@ export default function Editor() {
         <button className="tool" onClick={() => { stopDraw(); addPanels(); }} title="Add a set of panels with your own rows and columns"><I d="M3 5h18v14H3zM3 12h18M9 5v14M15 5v14" />Add panel set</button>
         <button className={`tool ${tool === 'panels' && !draw ? 'on' : ''}`} onClick={() => { stopDraw(); setTool('panels'); setSel(null); }} disabled={!design.blocks.length} title="Add or remove single panels by clicking"><I d="M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM15 16.5h4M17 14.5v4" />Add / remove panels</button>
         <div className="tools-label">3 · Extras</div>
-        <button className="tool" onClick={() => { stopDraw(); addObstruction(); }}><I d="M4 8l8-4 8 4v8l-8 4-8-4zM4 8l8 4 8-4M12 12v8" />Add obstruction</button>
-        <button className="tool" onClick={() => { stopDraw(); addWalkway(); }}><I d="M4 20L9 4M20 20L15 4M12 6v2M12 11v2M12 16v2" />Add walkway</button>
+        <button className={`tool ${obMenu ? 'on' : ''}`} onClick={() => { stopDraw(); if (project.type === 'commercial') setObMenu((v) => !v); else addObstruction(); }}><I d="M4 8l8-4 8 4v8l-8 4-8-4zM4 8l8 4 8-4M12 12v8" />Add obstruction</button>
+        {obMenu && (
+          <div className="tool-sub">
+            <button onClick={() => addObstruction('skylight')} title="A clear roof sheet that lets daylight in. Panels cannot be placed on it.">Skylight</button>
+            <button onClick={() => addObstruction('fan')} title="A roof exhaust fan (turbo ventilator). Its shadow is included in the generation.">Exhaust fan</button>
+            <button onClick={() => addObstruction('custom')} title="A box with your own width, length and height">Custom</button>
+          </div>
+        )}
+        <button className="tool" onClick={() => { stopDraw(); setObMenu(false); addWalkway(); }}><I d="M4 20L9 4M20 20L15 4M12 6v2M12 11v2M12 16v2" />Add walkway</button>
         <div className="tools-label">View</div>
         <button className={`tool ${tool === 'select' && !draw ? 'on' : ''}`} onClick={() => { stopDraw(); setTool('select'); }}><I d="M5 3l14 7-6 2-2 6z" />Select</button>
         <button className="tool" onClick={() => scene.current?.engine()?.fit()}><I d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" />Fit to layout</button>
@@ -746,10 +759,11 @@ function BlockPanel({ b, design, mods, patch, onDuplicate, onDelete, onPanelsToo
 }
 
 function BoxPanel({ o, walkway, roof, patch, onDuplicate, onDelete }: { o: Obstruction | Walkway; walkway: boolean; roof: string; patch: (p: any) => void; onDuplicate: () => void; onDelete: () => void }) {
+  const kind: ObstructionType | '' = walkway ? '' : (o as Obstruction).type || 'custom';
   return (
     <>
       <Head name={o.name} onName={(name) => patch({ name })} onDuplicate={onDuplicate} onDelete={onDelete} />
-      <div className="ed-sec"><div className="t">{walkway ? 'Walkway size' : 'Obstruction size'}</div>
+      <div className="ed-sec"><div className="t">{walkway ? 'Walkway size' : kind === 'skylight' ? 'Skylight size' : kind === 'fan' ? 'Exhaust fan size' : 'Obstruction size'}</div>
         <div className="ef"><label>Width</label><Num value={o.w} min={0.1} max={500} step={0.01} unit="m" onCommit={(v) => patch({ w: v })} /></div>
         <div className="ef"><label>Length</label><Num value={o.l} min={0.1} max={1000} step={0.01} unit="m" onCommit={(v) => patch({ l: v })} /></div>
         {walkway && roof
@@ -762,7 +776,9 @@ function BoxPanel({ o, walkway, roof, patch, onDuplicate, onDelete }: { o: Obstr
         <div className="ef"><label>East</label><Num value={o.x} min={-2000} max={2000} step={0.1} unit="m" onCommit={(v) => patch({ x: v })} /></div>
         <div className="ef"><label>North</label><Num value={-o.z} min={-2000} max={2000} step={0.1} unit="m" onCommit={(v) => patch({ z: -v })} /></div>
       </div>
-      {!walkway && <div className="ewarn">Use obstructions for water tanks, parapets, lift rooms or nearby buildings. Their shadows are included in “Calculate generation”.</div>}
+      {kind === 'custom' && <div className="ewarn">Use obstructions for water tanks, parapets, lift rooms or nearby buildings. Their shadows are included in “Calculate generation”.</div>}
+      {kind === 'skylight' && <div className="ewarn">A skylight is a clear roof sheet. Panels cannot be placed over it.</div>}
+      {kind === 'fan' && <div className="ewarn">A roof exhaust fan. Panels cannot be placed over it and its shadow is included in “Calculate generation”.</div>}
     </>
   );
 }

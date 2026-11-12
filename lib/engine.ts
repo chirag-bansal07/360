@@ -2,6 +2,7 @@
 // Axes: x = east, y = up, z = south. One unit = one metre.
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import type { Design, ModuleSpec, Pt, Results } from './types';
 import { findModule } from './catalog';
 import { shedRoofY, shedUnder, shedNormal, blockSlots, blockYaw, designBounds, polyCentre, pointInPoly, rad, PANEL_THICK } from './geometry';
@@ -46,6 +47,45 @@ function panelTexture(cellsX: number, cellsY: number, blue: boolean) {
   t.colorSpace = THREE.SRGBColorSpace;
   t.anisotropy = 8;
   return t;
+}
+
+// One mesh of a yellow walkway grating: yellow bars around a see-through square hole. The hole keeps the yellow
+// colour (only its alpha is 0), so the grating stays yellow when seen from far away.
+function gratingTexture() {
+  const n = 32, bar = 6, data = new Uint8Array(n * n * 4);
+  for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) {
+    const solid = i < bar || i >= n - bar || j < bar || j >= n - bar, k = (j * n + i) * 4;
+    data[k] = 245; data[k + 1] = 184; data[k + 2] = 18; data[k + 3] = solid ? 255 : 0;
+  }
+  const t = new THREE.DataTexture(data, n, n, THREE.RGBAFormat);
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.magFilter = THREE.LinearFilter; t.minFilter = THREE.LinearMipmapLinearFilter; t.generateMipmaps = true;
+  t.anisotropy = 8;
+  t.needsUpdate = true;
+  return t;
+}
+
+// The vanes of an exhaust fan: light and dark metal strips going round it.
+function vaneTexture() {
+  const c = document.createElement('canvas'); c.width = 32; c.height = 8;
+  const g = c.getContext('2d')!;
+  g.fillStyle = '#dfe4e8'; g.fillRect(0, 0, 32, 8);
+  g.fillStyle = '#7d8790'; g.fillRect(20, 0, 12, 8);
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.wrapS = THREE.RepeatWrapping; t.repeat.set(16, 1);
+  t.anisotropy = 8;
+  return t;
+}
+
+// A roof exhaust fan (turbo ventilator) one metre across and one metre tall, centred: a round neck with a ribbed dome on it.
+function fanGeometry() {
+  const neck = new THREE.CylinderGeometry(0.3, 0.34, 0.36, 20); neck.translate(0, -0.32, 0);
+  const dome = new THREE.SphereGeometry(0.5, 16, 7); dome.scale(1, 0.66, 1); dome.translate(0, 0.17, 0);
+  const g = mergeGeometries([neck, dome])!;
+  neck.dispose(); dome.dispose();
+  return g;
 }
 
 function ramp(stops: [number, number, number, number][], v: number, out: THREE.Color) {
@@ -432,9 +472,27 @@ export class Engine {
       addHandles('keepout', k.id, k.points, (x, z) => ky(x, z) + 0.02);
     }
 
-    const box = (o: { id: string; x: number; z: number; w: number; l: number; h: number; rotation: number }, kind: 'obstruction' | 'walkway') => {
+    const box = (o: { id: string; x: number; z: number; w: number; l: number; h: number; rotation: number; type?: string }, kind: 'obstruction' | 'walkway') => {
       const isWalk = kind === 'walkway';
-      const mesh = new THREE.Mesh(new THREE.BoxGeometry(o.w, isWalk ? 0.06 : o.h, o.l), new THREE.MeshLambertMaterial({ color: isWalk ? '#e3d9a8' : '#a7b0b9' }));
+      let mesh: THREE.Mesh;
+      if (isWalk) {
+        // a yellow grating: square meshes about 4 cm across, see-through between the bars
+        const geo = new THREE.BoxGeometry(o.w, 0.04, o.l);
+        const nx = Math.max(1, Math.round(o.w / 0.04)), nz = Math.max(1, Math.round(o.l / 0.04)), uv = geo.attributes.uv;
+        for (let i = 0; i < uv.count; i++) uv.setXY(i, uv.getX(i) * nx, uv.getY(i) * nz);
+        if (!this.textures.grating) this.textures.grating = gratingTexture();
+        const edge = new THREE.MeshLambertMaterial({ color: '#e0a80c' });
+        const top = new THREE.MeshLambertMaterial({ map: this.textures.grating, alphaTest: 0.5, side: THREE.DoubleSide });
+        mesh = new THREE.Mesh(geo, [edge, edge, top, top, edge, edge]);
+      } else if (o.type === 'fan') {
+        const geo = fanGeometry(); geo.scale(o.w, o.h, o.l);
+        if (!this.textures.vanes) this.textures.vanes = vaneTexture();
+        mesh = new THREE.Mesh(geo, new THREE.MeshLambertMaterial({ color: '#c9cfd5', map: this.textures.vanes }));
+      } else if (o.type === 'skylight') {
+        // a clear roof sheet: light comes through it, so it is drawn see-through
+        mesh = new THREE.Mesh(new THREE.BoxGeometry(o.w, o.h, o.l), new THREE.MeshLambertMaterial({ color: '#bfe6ff', transparent: true, opacity: 0.62, depthWrite: false }));
+        mesh.renderOrder = 2;
+      } else mesh = new THREE.Mesh(new THREE.BoxGeometry(o.w, o.h, o.l), new THREE.MeshLambertMaterial({ color: '#a7b0b9' }));
       // On a shed these sit on the roof: a walkway lies on the roof surface and follows its tilt, an obstruction stands on it.
       const roof = shedUnder(d, o.x, o.z);
       const base = roof ? shedRoofY(roof, o.x, o.z) : 0;
@@ -450,13 +508,14 @@ export class Engine {
         mesh.position.set(o.x, isWalk ? o.h + 0.03 : o.h / 2, o.z);
         mesh.quaternion.copy(turn);
       }
-      mesh.castShadow = !isWalk; mesh.receiveShadow = true;
+      mesh.castShadow = !isWalk && o.type !== 'skylight'; mesh.receiveShadow = true;
       mesh.userData.sel = { kind, id: o.id };
       const hw = o.w / 2 + 0.1, hl = o.l / 2 + 0.1, y = (isWalk ? 0.03 : o.h / 2) + 0.08;
       const line = new THREE.LineLoop(
         new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(-hw, y, -hl), new THREE.Vector3(hw, y, -hl), new THREE.Vector3(hw, y, hl), new THREE.Vector3(-hw, y, hl)]),
         new THREE.LineBasicMaterial({ color: '#ffffff', transparent: true, opacity: 0.7, depthTest: false }));
       line.renderOrder = 5;
+      if (isWalk) line.userData.quiet = true; // a walkway shows its outline only while it is selected
       mesh.add(line);
       this.outlines.push({ line, kind, id: o.id });
       this.content.add(mesh); this.pickables.push(mesh);
