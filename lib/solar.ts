@@ -107,14 +107,17 @@ async function fetchFromGoogle(lat: number, lng: number, key: string): Promise<{
 const running = new Map<string, Promise<{ meta: SolarPic; jpeg: Buffer | null }>>(); // one paid request per site, even when several screens ask at once
 
 // The picture's position and date. The first call for a site fetches it from Google (a few seconds) and keeps it.
-export async function solarInfo(lat: number, lng: number, key: string): Promise<SolarPic | null> {
+// That first fetch costs money, so it only happens when mayFetch agrees: the caller checks that the site is a real
+// project of the person asking, and that they are inside their daily limit. Without mayFetch only kept pictures are used.
+export async function solarInfo(lat: number, lng: number, key: string, mayFetch?: () => Promise<boolean>): Promise<SolarPic | null> {
   if (!isFinite(lat) || !isFinite(lng)) return null;
   const k = keyOf(lat, lng);
   const hit = await cached(k, false);
   if (hit) return hit.meta.none ? null : hit.meta;
-  if (!key) return null;
+  if (!key || !mayFetch) return null;
   let job = running.get(k);
   if (!job) {
+    if (!(await mayFetch())) return null;
     job = fetchFromGoogle(lat, lng, key).then(async (r) => { await keep(k, r.meta, r.jpeg); return r; }).finally(() => running.delete(k));
     running.set(k, job);
   }
