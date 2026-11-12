@@ -31,25 +31,32 @@ export function findModule(mods: ModuleSpec[], id: string): ModuleSpec {
 
 export const STRUCTURE_BRAND = 'Sunmount mounting structure';
 // tilt is set only for the structure that tilts the panels by itself
-export const STRUCTURES: { id: StructureId; name: string; orientation: Block['orientation']; tilt?: number }[] = [
+// gapV = the clear gap between rows a new set of this structure starts with
+export const STRUCTURES: { id: StructureId; name: string; orientation: Block['orientation']; tilt?: number; gapV?: number }[] = [
   { id: 'longrail', name: 'Long rail', orientation: 'landscape' },
-  { id: 'monorail', name: 'Mono rail', orientation: 'landscape' },
-  { id: 'minirail', name: 'Mini rail', orientation: 'portrait' },
-  { id: 'reverse', name: 'Reverse tilt', orientation: 'landscape', tilt: 15 },
-  { id: 'reversep', name: 'Reverse tilt', orientation: 'portrait', tilt: 12 },
+  { id: 'monorail', name: 'Mono rail', orientation: 'portrait' },
+  { id: 'minirail', name: 'Mini rail', orientation: 'landscape' },
+  { id: 'seam', name: 'Standing seam', orientation: 'landscape' },
+  { id: 'reverse', name: 'Reverse tilt', orientation: 'landscape', tilt: 12, gapV: 0.6 },
+  { id: 'reversep', name: 'Reverse tilt', orientation: 'portrait', tilt: 12, gapV: 1 },
 ];
 export const findStructure = (id?: StructureId) => STRUCTURES.find((s) => s.id === id) || STRUCTURES[0];
-// Panel sets saved before structures existed are matched by their orientation.
-export const structureOf = (b: Block) => findStructure(b.structure || (b.orientation === 'portrait' ? 'minirail' : 'longrail'));
+// Panel sets saved before structures existed are matched by their orientation. Mono rail and mini rail once had their
+// orientations the other way round: a set saved then keeps its panels as drawn and takes the name that fits them.
+export const structureOf = (b: Block) => {
+  const st = findStructure(b.structure || (b.orientation === 'portrait' ? 'monorail' : 'longrail'));
+  if ((st.id === 'monorail' || st.id === 'minirail') && st.orientation !== b.orientation) return findStructure(b.orientation === 'portrait' ? 'monorail' : 'minirail');
+  return st;
+};
 
 export const uid = () => Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4);
 
 export function newBlock(design: Design, x = 0, z = 0): Block {
-  const n = design.blocks.length + 1, st = findStructure(design.defaultStructure || 'minirail');
+  const n = design.blocks.length + 1, st = findStructure(design.defaultStructure || 'monorail');
   return {
     id: uid(), name: `Block ${n}`, x, z, azimuth: 180, rows: 4, cols: 10, orientation: st.orientation, structure: st.id,
     moduleId: design.defaultModuleId, mounting: st.tilt ? 'rows' : 'flush', tilt: st.tilt ?? 5, ownTilt: !!st.tilt, mountHeight: 1,
-    gapH: 0.025, gapV: 0.025, aisleRowsEvery: 0, aisleRowsGap: 0.6, aisleColsEvery: 0, aisleColsGap: 0.6, removed: [],
+    gapH: 0.025, gapV: st.gapV ?? 0.025, aisleRowsEvery: 0, aisleRowsGap: 0.6, aisleColsEvery: 0, aisleColsGap: 0.6, removed: [],
   };
 }
 

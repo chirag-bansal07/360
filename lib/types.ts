@@ -1,7 +1,7 @@
 export type ModuleSpec = { id: string; name: string; watt: number; length: number; width: number; custom?: boolean };
 
 // Sunmount mounting structure a panel set sits on. It decides the panel orientation.
-export type StructureId = 'longrail' | 'monorail' | 'minirail' | 'reverse' | 'reversep';
+export type StructureId = 'longrail' | 'monorail' | 'minirail' | 'seam' | 'reverse' | 'reversep';
 
 export type Block = {
   id: string;

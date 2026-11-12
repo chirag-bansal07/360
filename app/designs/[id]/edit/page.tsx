@@ -239,7 +239,7 @@ export default function Editor() {
     const sid = sel?.kind === 'shed' ? sel.id : sel?.kind === 'block' ? d.blocks.find((b) => b.id === sel.id)?.shedId : d.sheds.length === 1 ? d.sheds[0].id : '';
     const on = d.sheds.find((q) => q.id === sid) || shedUnder(d, c.x, c.z);
     const at = on ? polyCentre(on.points) : [c.x, c.z];
-    const w: Walkway = { id: uid(), name: `Walkway ${d.walkways.length + 1}`, x: r2(at[0]), z: r2(at[1]), w: 0.5, l: 10, h: 1, rotation: on ? (shedAzimuth(on) + 90) % 180 : 90 };
+    const w: Walkway = { id: uid(), name: `Walkway ${d.walkways.length + 1}`, x: r2(at[0]), z: r2(at[1]), w: 0.31, l: 3.66, h: 1, rotation: on ? (shedAzimuth(on) + 90) % 180 : 90 };
     if (on) setNotice(`Walkway placed on the roof of ${on.name}. Drag it into place; it follows the roof tilt.`);
     apply({ ...d, walkways: [...d.walkways, w] }); setSel({ kind: 'walkway', id: w.id }); setTool('select');
   };
@@ -256,7 +256,8 @@ export default function Editor() {
     } else {
       const kind = sel.kind === 'obstruction' ? 'obstructions' : 'walkways';
       const o = (d[kind] as any[]).find((x) => x.id === sel.id); if (!o) return;
-      const no = { ...o, id: uid(), x: r2(o.x + o.w + 1) };
+      // a walkway copy continues the run: end to end with the original, the short (width) edges touching
+      const c = boxPlan(d, o), no = sel.kind === 'walkway' ? { ...o, id: uid(), name: `Walkway ${d.walkways.length + 1}`, x: r2(o.x + c[3][0] - c[0][0]), z: r2(o.z + c[3][1] - c[0][1]) } : { ...o, id: uid(), x: r2(o.x + o.w + 1) };
       apply({ ...d, [kind]: [...(d[kind] as any[]), no] } as Design); setSel({ kind: sel.kind, id: no.id });
     }
   };
@@ -515,7 +516,7 @@ export default function Editor() {
 
             <div className="ed-sec"><div className="t">Defaults for new panels</div>
               <div className="ef wide"><select className="eselect" value={design.defaultModuleId} onChange={(e) => apply({ ...design, defaultModuleId: e.target.value })}>{mods.map((m) => <option key={m.id} value={m.id}>{m.name} ({m.length} × {m.width} m)</option>)}</select></div>
-              <div className="ef wide"><label>{STRUCTURE_BRAND} for new panel sets</label><select className="eselect" value={design.defaultStructure || 'minirail'} onChange={(e) => apply({ ...design, defaultStructure: e.target.value as StructureId })}>{STRUCTURES.map((s) => <option key={s.id} value={s.id}>{s.name} ({s.orientation}{s.tilt ? `, ${s.tilt}° tilt` : ''})</option>)}</select></div>
+              <div className="ef wide"><label>{STRUCTURE_BRAND} for new panel sets</label><select className="eselect" value={design.defaultStructure || 'monorail'} onChange={(e) => apply({ ...design, defaultStructure: e.target.value as StructureId })}>{STRUCTURES.map((s) => <option key={s.id} value={s.id}>{s.name} ({s.orientation}{s.tilt ? `, ${s.tilt}° tilt` : ''})</option>)}</select></div>
               <div style={{ color: 'var(--ed-muted)', fontSize: 12 }}>Each panel set can use a different structure. Select a panel set to change it.</div>
             </div>
 
@@ -647,8 +648,10 @@ function BlockPanel({ b, design, mods, patch, onDuplicate, onDelete, onPanelsToo
   const turn = (d: number) => face(b.azimuth + d);
   const setStructure = (id: StructureId) => {
     const n = findStructure(id);
-    if (n.tilt) patch({ structure: id, orientation: n.orientation, mounting: 'rows', tilt: n.tilt, ownTilt: true, azimuth: sloped ? (slopeAz + 180) % 360 : b.azimuth });
-    else patch({ structure: id, orientation: n.orientation, ownTilt: false, ...(st.tilt && !sloped ? { mounting: 'flush' as const, tilt: 0 } : {}) });
+    // the row gap follows the structure's own default, unless it was changed by hand
+    const gap = n.gapV ?? (st.gapV && b.gapV === st.gapV ? 0.025 : b.gapV);
+    if (n.tilt) patch({ structure: id, orientation: n.orientation, mounting: 'rows', tilt: n.tilt, gapV: gap, ownTilt: true, azimuth: sloped ? (slopeAz + 180) % 360 : b.azimuth });
+    else patch({ structure: id, orientation: n.orientation, gapV: gap, ownTilt: false, ...(st.tilt && !sloped ? { mounting: 'flush' as const, tilt: 0 } : {}) });
   };
   return (
     <>
@@ -725,8 +728,8 @@ function BoxPanel({ o, walkway, roof, patch, onDuplicate, onDelete }: { o: Obstr
     <>
       <Head name={o.name} onName={(name) => patch({ name })} onDuplicate={onDuplicate} onDelete={onDelete} />
       <div className="ed-sec"><div className="t">{walkway ? 'Walkway size' : 'Obstruction size'}</div>
-        <div className="ef"><label>Width</label><Num value={o.w} min={0.1} max={500} step={0.1} unit="m" onCommit={(v) => patch({ w: v })} /></div>
-        <div className="ef"><label>Length</label><Num value={o.l} min={0.1} max={1000} step={0.1} unit="m" onCommit={(v) => patch({ l: v })} /></div>
+        <div className="ef"><label>Width</label><Num value={o.w} min={0.1} max={500} step={0.01} unit="m" onCommit={(v) => patch({ w: v })} /></div>
+        <div className="ef"><label>Length</label><Num value={o.l} min={0.1} max={1000} step={0.01} unit="m" onCommit={(v) => patch({ l: v })} /></div>
         {walkway && roof
           ? <div className="kv"><span>Height</span><b>on the roof of {roof}</b></div>
           : <div className="ef"><label>{walkway ? 'Height above ground' : 'Height'}<small>{walkway ? 'used on open ground' : roof ? `above the roof of ${roof}, follows its tilt` : 'casts a shadow on the panels'}</small></label><Num value={o.h} min={0} max={150} step={0.1} unit="m" onCommit={(v) => patch({ h: v })} /></div>}
