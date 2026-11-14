@@ -157,7 +157,7 @@ export class Engine {
   private down: { x: number; y: number } | null = null;
   private handles: THREE.Mesh[] = [];
   private vdrag: null | { mesh: THREE.Mesh; y: number } = null;
-  private draw: null | { kind: DrawKind; pts: Pt[]; cursor: Pt | null } = null;
+  private draw: null | { kind: DrawKind; pts: Pt[]; cursor: Pt | null; rect: boolean } = null;
   private drawGroup = new THREE.Group();
 
   constructor(private el: HTMLElement, private opts: { lat: number; lng: number; interactive: boolean; plain?: boolean; share?: string; picture?: 'auto' | 'solar' | 'tiles'; ground?: { span: number; x: number; z: number } }, private events: EngineEvents = {}) {
@@ -670,8 +670,9 @@ export class Engine {
   }
 
   // ---------- drawing an outline by clicking its corners ----------
-  startDraw(kind: DrawKind) {
-    this.draw = { kind, pts: [], cursor: null };
+  // rect: the outline is a rectangle set with three clicks: two corners along one edge, then the far side
+  startDraw(kind: DrawKind, rect = false) {
+    this.draw = { kind, pts: [], cursor: null, rect };
     this.renderer.domElement.style.cursor = 'crosshair';
     this.redrawPreview();
     this.events.onDraw?.({ kind, points: [], cursor: null });
@@ -685,7 +686,7 @@ export class Engine {
   }
   finishDraw() {
     const d = this.draw;
-    if (!d || d.pts.length < 3) return false;
+    if (!d || d.pts.length < 3 || d.rect) return false;
     this.draw = null;
     this.redrawPreview();
     this.renderer.domElement.style.cursor = 'default';
@@ -699,6 +700,12 @@ export class Engine {
     this.redrawPreview();
     this.events.onDraw?.({ kind: this.draw.kind, points: [...this.draw.pts], cursor: this.draw.cursor });
   }
+  // The rectangle on the edge a-b that reaches as far across as point c.
+  private rectFrom(a: Pt, b: Pt, c: Pt): Pt[] {
+    const len = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1, nx = -(b[1] - a[1]) / len, nz = (b[0] - a[0]) / len;
+    const w = (c[0] - a[0]) * nx + (c[1] - a[1]) * nz, r = (v: number) => Math.round(v * 100) / 100;
+    return [a, b, [r(b[0] + nx * w), r(b[1] + nz * w)], [r(a[0] + nx * w), r(a[1] + nz * w)]];
+  }
   private closeRadius() { // metres that count as "clicked the first corner again"
     if (this.view === '2d') return Math.max((this.orthoSize / Math.max(this.ortho.zoom, 0.01) / Math.max(this.el.clientHeight, 1)) * 14, 0.15);
     return 0.8;
@@ -709,7 +716,7 @@ export class Engine {
     const d = this.draw;
     if (d && d.pts.length) {
       const color = d.kind === 'shed' ? '#ffb000' : '#ff5a5f';
-      const pts = [...d.pts, ...(d.cursor ? [d.cursor] : [])];
+      const pts = d.rect && d.pts.length === 2 && d.cursor ? this.rectFrom(d.pts[0], d.pts[1], d.cursor) : [...d.pts, ...(d.cursor ? [d.cursor] : [])];
       const v = pts.map(([x, z]) => new THREE.Vector3(x, 0.3, z));
       if (pts.length >= 3) v.push(v[0].clone());
       const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints(v), new THREE.LineBasicMaterial({ color, depthTest: false }));
@@ -815,9 +822,14 @@ export class Engine {
       const gp = this.groundPoint(e);
       if (!gp) return;
       const d = this.draw, pt: Pt = [Math.round(gp.x * 100) / 100, Math.round(gp.z * 100) / 100];
-      if (d.pts.length >= 3 && Math.hypot(pt[0] - d.pts[0][0], pt[1] - d.pts[0][1]) < this.closeRadius()) { this.finishDraw(); return; }
+      if (!d.rect && d.pts.length >= 3 && Math.hypot(pt[0] - d.pts[0][0], pt[1] - d.pts[0][1]) < this.closeRadius()) { this.finishDraw(); return; }
       const last = d.pts[d.pts.length - 1];
       if (last && Math.hypot(pt[0] - last[0], pt[1] - last[1]) < 0.05) return; // second click of a double-click
+      if (d.rect && d.pts.length === 2) { // third click: the far side of the rectangle
+        d.pts = this.rectFrom(d.pts[0], d.pts[1], pt); d.rect = false;
+        this.finishDraw();
+        return;
+      }
       d.pts.push(pt);
       this.redrawPreview();
       this.events.onDraw?.({ kind: d.kind, points: [...d.pts], cursor: pt });

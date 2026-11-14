@@ -99,6 +99,9 @@ export default function Editor() {
   const [draw, setDraw] = useState<DrawKind | null>(null);
   const [drawInfo, setDrawInfo] = useState<{ points: Pt[]; cursor: Pt | null } | null>(null);
   const [notice, setNotice] = useState('');
+  const [shedMenu, setShedMenu] = useState(false); // the three ways to add a shed
+  const [drawRect, setDrawRect] = useState(false); // the outline being drawn is a three-click rectangle
+  const [shedForm, setShedForm] = useState<null | { l: number; w: number; rot: number; h: number }>(null); // a shed typed as dimensions
   const [obMenu, setObMenu] = useState(false); // the three kinds under "Add obstruction" (commercial projects)
   const [sunOn, setSunOn] = useState(false);
   const [month, setMonth] = useState(5);
@@ -196,8 +199,27 @@ export default function Editor() {
   const CROWDED = 'There is no clear space for it nearby, so it lies over another item. Make it smaller or drag it to a clear place.';
   const centre = () => scene.current?.engine()?.viewCentre() || { x: 0, z: 0 };
 
-  const startDraw = (kind: DrawKind) => { setTool('select'); setSel(null); setNotice(''); setDraw(kind); };
+  const startDraw = (kind: DrawKind, rect = false) => { setTool('select'); setSel(null); setNotice(''); setShedMenu(false); setShedForm(null); setDrawRect(rect); setDraw(kind); };
   const stopDraw = () => { setDraw(null); setDrawInfo(null); };
+  // A shed from typed dimensions: a rectangle at the middle of the view, or beside the other sheds when that place is taken.
+  const addShedBySize = () => {
+    const d = latest.current!, f = shedForm; if (!f) return;
+    const a = rad(f.rot), ux = Math.cos(a), uz = -Math.sin(a); // length runs east-west at 0 and turns anticlockwise
+    const at = (cx: number, cz: number): Pt[] => ([[-1, -1], [1, -1], [1, 1], [-1, 1]] as Pt[]).map(([i, j]) => [r2(cx + (i * f.l / 2) * ux - (j * f.w / 2) * uz), r2(cz + (i * f.l / 2) * uz + (j * f.w / 2) * ux)] as Pt);
+    const box = (pts: Pt[]) => ({ x0: Math.min(...pts.map((q) => q[0])), x1: Math.max(...pts.map((q) => q[0])), z0: Math.min(...pts.map((q) => q[1])), z1: Math.max(...pts.map((q) => q[1])) });
+    const c = centre();
+    let pts = at(c.x, c.z);
+    const mine = box(pts), others = d.sheds.map((s) => box(s.points));
+    if (others.some((o) => o.x0 < mine.x1 && o.x1 > mine.x0 && o.z0 < mine.z1 && o.z1 > mine.z0)) {
+      // 3 m east of everything already drawn, level with it
+      const east = Math.max(...others.map((o) => o.x1)), mid = (Math.min(...others.map((o) => o.z0)) + Math.max(...others.map((o) => o.z1))) / 2;
+      pts = at(east + 3 + (mine.x1 - mine.x0) / 2, mid);
+    }
+    const shed: Shed = { id: uid(), name: `Shed ${d.sheds.length + 1}`, points: pts, height: f.h, setback: 0.3 };
+    apply({ ...d, sheds: [...d.sheds, shed] }); setSel({ kind: 'shed', id: shed.id }); setShedForm(null);
+    setNotice(`Shed added: ${fmt(f.l)} × ${fmt(f.w)} m. Move it with the arrow keys, or drag its corner dots. Then press “Add panel set”.`);
+    setTimeout(() => scene.current?.engine()?.fit(), 60);
+  };
 
   // adds a manual panel set (rows x columns) on a shed; nothing is filled automatically
   const addPanels = (shedId?: string) => {
@@ -363,7 +385,7 @@ export default function Editor() {
       const t = e.target as HTMLElement;
       if (t && ['INPUT', 'SELECT', 'TEXTAREA'].includes(t.tagName)) return;
       if (draw) {
-        if (e.key === 'Enter') { if (!scene.current?.engine()?.finishDraw()) setNotice('Click at least 3 corners before finishing.'); }
+        if (e.key === 'Enter') { if (!scene.current?.engine()?.finishDraw()) setNotice(drawRect ? 'Click the far side of the rectangle to finish.' : 'Click at least 3 corners before finishing.'); }
         else if (e.key === 'Escape') stopDraw();
         else if (e.key === 'Backspace') { e.preventDefault(); scene.current?.engine()?.undoDrawPoint(); }
         return;
@@ -419,7 +441,15 @@ export default function Editor() {
   if (draw) {
     const pts = drawInfo?.points || [], cur = drawInfo?.cursor;
     const what = draw === 'shed' ? 'shed roof' : 'area where panels must not go';
-    if (!pts.length) hint = `Click the first corner of the ${what}. Scroll to zoom in for accuracy · Esc cancels`;
+    if (drawRect) {
+      const span = (a: Pt, b: Pt) => Math.hypot(b[0] - a[0], b[1] - a[1]);
+      if (!pts.length) hint = `Rectangle: click one corner of the ${what}. Scroll to zoom in for accuracy · Esc cancels`;
+      else if (pts.length === 1) hint = `Click the next corner along the same edge${cur ? ` · this side ${fmt(span(pts[0], cur))} m` : ''} · Backspace undoes · Esc cancels`;
+      else {
+        const len = span(pts[0], pts[1]) || 1, wide = cur ? Math.abs((cur[0] - pts[0][0]) * -(pts[1][1] - pts[0][1]) + (cur[1] - pts[0][1]) * (pts[1][0] - pts[0][0])) / len : 0;
+        hint = `Move across the roof and click the far side · ${fmt(len)} × ${fmt(wide)} m · area ${fmt(len * wide)} m² · Backspace undoes · Esc cancels`;
+      }
+    } else if (!pts.length) hint = `Click the first corner of the ${what}. Scroll to zoom in for accuracy · Esc cancels`;
     else {
       const last = pts[pts.length - 1];
       const side = cur ? Math.hypot(cur[0] - last[0], cur[1] - last[1]) : 0;
@@ -431,7 +461,7 @@ export default function Editor() {
   else if (shed || keep) hint ='Drag the orange corner dots to adjust the outline · arrow keys move it 0.1 m (Shift = 1 m)';
   else if (block?.shedId) hint = 'Drag the set to move it on the shed · arrow keys nudge 0.1 m (Shift = 1 m) · set rows, columns and gaps on the right';
   else if (picked) hint = 'Drag to move · arrow keys nudge 0.1 m (Shift = 1 m) · Delete removes';
-  else if (design.sheds.length === 0) hint = 'Step 1: press “Draw shed” and click each corner of the roof on the map.';
+  else if (design.sheds.length === 0) hint = 'Step 1: press “Draw shed” and choose Rectangle, Corner by corner or By dimensions.';
   else if (group) hint = `${many.length} items selected · Ctrl + click adds or removes one · line them up or set the gap on the right · Esc clears`;
   else hint = view === '2d' ? 'Click a shed or its panels to edit · Ctrl + click selects several · drag empty space to pan · scroll to zoom' : 'Drag to rotate · right-drag to pan · scroll to zoom';
 
@@ -459,13 +489,20 @@ export default function Editor() {
 
       <div className="ed-tools">
         <div className="tools-label">1 · Roof</div>
-        <button className={`tool ${draw === 'shed' ? 'on' : ''}`} onClick={() => (draw === 'shed' ? stopDraw() : startDraw('shed'))} title="Click the corners of the shed roof"><I d="M3 11l9-6 9 6M5 10v9h14v-9M9 19v-5h6v5" />Draw shed</button>
+        <button className={`tool ${draw === 'shed' || shedMenu ? 'on' : ''}`} onClick={() => { if (draw === 'shed') stopDraw(); else { setObMenu(false); setShedMenu((v) => !v); } }} title="Add a shed roof: as a rectangle, corner by corner, or from its dimensions"><I d="M3 11l9-6 9 6M5 10v9h14v-9M9 19v-5h6v5" />Draw shed</button>
+        {shedMenu && (
+          <div className="tool-sub">
+            <button onClick={() => startDraw('shed', true)} title="Three clicks: two corners along one edge, then the far side">Rectangle</button>
+            <button onClick={() => startDraw('shed')} title="Click every corner of the roof, for any shape">Corner by corner</button>
+            <button onClick={() => { stopDraw(); setShedMenu(false); setSel(null); setTool('select'); setShedForm({ l: 40, w: 20, rot: 0, h: 6 }); }} title="Type the length and width in metres">By dimensions</button>
+          </div>
+        )}
         <button className={`tool ${draw === 'keepout' ? 'on' : ''}`} onClick={() => (draw === 'keepout' ? stopDraw() : startDraw('keepout'))} title="Mark skylights, vents or any area that must stay free"><I d="M5 5h14v14H5zM5 5l14 14M19 5L5 19" />No-panel area</button>
         <div className="tools-label">2 · Panels</div>
         <button className="tool" onClick={() => { stopDraw(); addPanels(); }} title="Add a set of panels with your own rows and columns"><I d="M3 5h18v14H3zM3 12h18M9 5v14M15 5v14" />Add panel set</button>
         <button className={`tool ${tool === 'panels' && !draw ? 'on' : ''}`} onClick={() => { stopDraw(); setTool('panels'); setSel(null); }} disabled={!design.blocks.length} title="Add or remove single panels by clicking"><I d="M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM15 16.5h4M17 14.5v4" />Add / remove panels</button>
         <div className="tools-label">3 · Extras</div>
-        <button className={`tool ${obMenu ? 'on' : ''}`} onClick={() => { stopDraw(); if (project.type === 'commercial') setObMenu((v) => !v); else addObstruction(); }}><I d="M4 8l8-4 8 4v8l-8 4-8-4zM4 8l8 4 8-4M12 12v8" />Add obstruction</button>
+        <button className={`tool ${obMenu ? 'on' : ''}`} onClick={() => { stopDraw(); setShedMenu(false); if (project.type === 'commercial') setObMenu((v) => !v); else addObstruction(); }}><I d="M4 8l8-4 8 4v8l-8 4-8-4zM4 8l8 4 8-4M12 12v8" />Add obstruction</button>
         {obMenu && (
           <div className="tool-sub">
             <button onClick={() => addObstruction('skylight')} title="A clear roof sheet that lets daylight in. Panels cannot be placed on it.">Skylight</button>
@@ -482,12 +519,26 @@ export default function Editor() {
       <div className="ed-canvas">
         <SceneView ref={scene} lat={project.lat} lng={project.lng} plain={project.noMap} interactive picture={project.imagery}
           onPicture={(c) => { setProject((p) => (p ? { ...p, imagery: c } : p)); api(`/api/projects/${project.id}`, 'PATCH', { imagery: c }).catch(() => {}); }} design={design} mods={mods} results={res}
-          view={view} tool={tool} selected={sel} also={group ? multi : NO_PICKS} sun={sun} events={events} draw={draw} />
+          view={view} tool={tool} selected={sel} also={group ? multi : NO_PICKS} sun={sun} events={events} draw={draw} drawRect={drawRect} />
         {notice && <div className="hint" style={{ bottom: 58, background: '#1f6b2ee6' }}>{notice}</div>}
         <div className="hint">{hint}</div>
       </div>
 
       <div className="ed-side">
+        {shedForm && !draw && (
+          <>
+            <h3>New shed by dimensions</h3>
+            <div className="ed-sec" style={{ marginBottom: 18 }}><div className="t">Shed size</div>
+              <div className="ef"><label>Length</label><Num value={shedForm.l} min={1} max={1000} step={0.5} unit="m" onCommit={(v) => setShedForm((s) => s && { ...s, l: v })} /></div>
+              <div className="ef"><label>Width</label><Num value={shedForm.w} min={1} max={1000} step={0.5} unit="m" onCommit={(v) => setShedForm((s) => s && { ...s, w: v })} /></div>
+              <div className="ef"><label>Rotation<small>0° = length runs east–west</small></label><Num value={shedForm.rot} min={0} max={359} step={1} unit="°" onCommit={(v) => setShedForm((s) => s && { ...s, rot: v })} /></div>
+              <div className="ef"><label>Roof height<small>at the lowest edge</small></label><Num value={shedForm.h} min={0} max={80} step={0.5} unit="m" onCommit={(v) => setShedForm((s) => s && { ...s, h: v })} /></div>
+              <button className="ebtn primary block" style={{ marginTop: 8 }} onClick={addShedBySize}>Add this shed</button>
+              <button className="ebtn block" style={{ marginTop: 6 }} onClick={() => setShedForm(null)}>Cancel</button>
+              <div style={{ color: 'var(--ed-muted)', fontSize: 12, marginTop: 8 }}>The shed is placed in the middle of the view, or beside the other sheds when that place is taken. Tilt and edge margin are set after it is added.</div>
+            </div>
+          </>
+        )}
         {shed && <ShedPanel s={shed} design={design} mods={mods} patch={(p) => patchShed(shed.id, p)} onDelete={() => setConfirmDel(true)}
           onPanels={() => addPanels(shed.id)} onPick={(bid) => setSel({ kind: 'block', id: bid })} onClear={() => clearPanels(shed.id)} onKeepout={() => startDraw('keepout')} />}
         {keep && <KeepoutPanel k={keep} patch={(p) => patchKeepout(keep.id, p)} onDelete={() => setConfirmDel(true)} />}
@@ -531,7 +582,7 @@ export default function Editor() {
             <div className="kv"><span>AC size</span><b>{fmt(totals.acKw)} kW</b></div>
             <div className="kv"><span>DC:AC ratio</span><b>{totals.acKw ? fmt(totals.ratio) : '-'}</b></div>
             <div className="kv"><span>Walkways</span><b>{fmt(totals.walkwayLength)} m</b></div>
-            {design.sheds.length === 0 && <button className="ebtn primary block" style={{ marginTop: 8 }} onClick={() => startDraw('shed')}>Draw the shed outline</button>}
+            {design.sheds.length === 0 && <button className="ebtn primary block" style={{ marginTop: 8 }} onClick={() => startDraw('shed', true)}>Draw the shed as a rectangle</button>}
             {design.sheds.length > 0 && (
               <div className="ed-sec"><div className="t">Sheds</div>
                 {design.sheds.map((s) => {

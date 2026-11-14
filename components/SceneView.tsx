@@ -9,7 +9,7 @@ type Props = {
   design: Design; mods: ModuleSpec[]; results: Results | null;
   view: '2d' | '3d'; tool: Tool; selected?: Selection; also?: NonNullable<Selection>[];
   sun?: [number, number, number] | null; colorMode?: ColorMode;
-  events?: EngineEvents; overlay?: boolean; draw?: DrawKind | null;
+  events?: EngineEvents; overlay?: boolean; draw?: DrawKind | null; drawRect?: boolean;
 };
 export type SceneHandle = { engine: () => Engine | null };
 
@@ -75,7 +75,7 @@ const SceneView = forwardRef<SceneHandle, Props>(function SceneView(p, ref) {
   useEffect(() => { eng.current?.setAlso(p.also || []); }, [p.also]);
   useEffect(() => { eng.current?.setColorMode(p.colorMode || 'normal'); }, [p.colorMode]);
   useEffect(() => { eng.current?.setSun(p.sun || null); }, [p.sun]);
-  useEffect(() => { if (p.draw) eng.current?.startDraw(p.draw); else eng.current?.cancelDraw(); }, [p.draw]);
+  useEffect(() => { if (p.draw) eng.current?.startDraw(p.draw, !!p.drawRect); else eng.current?.cancelDraw(); }, [p.draw, p.drawRect]);
 
   return (
     <>

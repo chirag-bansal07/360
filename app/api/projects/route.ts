@@ -29,13 +29,22 @@ export async function POST(req: Request) {
   if (!noMap && !placed) return fail('Pick the project location first.');
   const design = newDesign('Design 1');
   if (noMap) {
-    const L = Number(b.shed?.length), W = Number(b.shed?.width);
-    if (!(L >= 1 && L <= 1000) || !(W >= 1 && W <= 1000)) return fail('Enter the shed length and width in metres (1 to 1000).');
-    const tilt = num(b.shed?.tilt, 0, 60, 0);
-    // a rectangle around the centre: length runs east-west, width north-south
-    const shed: Shed = { id: uid(), name: 'Shed 1', points: [[-L / 2, -W / 2], [L / 2, -W / 2], [L / 2, W / 2], [-L / 2, W / 2]], height: num(b.shed?.height, 0, 80, 6), setback: num(b.shed?.setback, 0, 10, 0.3) };
-    if (tilt > 0) { shed.tilt = tilt; shed.slopeAz = num(b.shed?.slopeAz, 0, 359.99, 180); }
-    design.sheds = [shed];
+    // one shed or several: they stand in a row from west to east, "gap" metres apart, the row centred on the site point
+    const list: any[] = Array.isArray(b.sheds) ? b.sheds : [b.shed];
+    if (!list.length || list.length > 20) return fail('Enter between 1 and 20 sheds.');
+    const ok = (v: any) => Number(v) >= 1 && Number(v) <= 1000;
+    const bad = list.findIndex((s) => !ok(s?.length) || !ok(s?.width));
+    if (bad >= 0) return fail(`Enter the length and width of shed ${bad + 1} in metres (1 to 1000).`);
+    const gap = list.length > 1 ? num(b.gap, 0, 200, 3) : 0, r = (v: number) => Math.round(v * 100) / 100;
+    let x = -(list.reduce((s, q) => s + Number(q.length), 0) + gap * (list.length - 1)) / 2;
+    design.sheds = list.map((q, i) => {
+      const L = Number(q.length), W = Number(q.width), tilt = num(q.tilt, 0, 60, 0), x0 = r(x), x1 = r(x + L);
+      x += L + gap;
+      // a rectangle: length runs east-west, width north-south
+      const shed: Shed = { id: uid(), name: `Shed ${i + 1}`, points: [[x0, -W / 2], [x1, -W / 2], [x1, W / 2], [x0, W / 2]], height: num(q.height, 0, 80, 6), setback: num(q.setback, 0, 10, 0.3) };
+      if (tilt > 0) { shed.tilt = tilt; shed.slopeAz = num(q.slopeAz, 0, 359.99, 180); }
+      return shed;
+    });
   }
   const db = (await readDb());
   const project: Project = {

@@ -8,8 +8,14 @@ import { parseLatLng } from '@/lib/maplink';
 export default function CreateProject({ onClose }: { onClose: () => void }) {
   const router = useRouter();
   const [mode, setMode] = useState<'map' | 'shed'>('map'); // shed = no map: the project starts from typed shed dimensions
-  const [shed, setShed] = useState({ length: '40', width: '20', height: '6', tilt: '0', slopeAz: 180, setback: '0.3' });
-  const sh = (k: string, v: string | number) => setShed((x) => ({ ...x, [k]: v }));
+  // the sheds of a no-map project stand in a row from west to east, "gap" metres apart
+  const [sheds, setSheds] = useState([{ length: '40', width: '20', height: '6', tilt: '0', slopeAz: 180, setback: '0.3' }]);
+  const [at, setAt] = useState(0); // the shed being edited
+  const [gap, setGap] = useState('3');
+  const shed = sheds[Math.min(at, sheds.length - 1)];
+  const sh = (k: string, v: string | number) => setSheds((l) => l.map((x, i) => (i === at ? { ...x, [k]: v } : x)));
+  const addShed = () => { if (sheds.length >= 20) return; setSheds((l) => [...l, { ...l[l.length - 1] }]); setAt(sheds.length); };
+  const dropShed = () => { setSheds((l) => l.filter((_, i) => i !== at)); setAt((i) => Math.max(0, Math.min(i, sheds.length - 2))); };
   const [loc, setLoc] = useState('');
   const [pos, setPos] = useState<{ lat: number; lng: number } | null>(null);
   const [matches, setMatches] = useState<{ label: string; lat: number; lng: number }[]>([]);
@@ -64,16 +70,16 @@ export default function CreateProject({ onClose }: { onClose: () => void }) {
   }
 
   async function create() {
-    const L = Number(shed.length), W = Number(shed.width);
+    const bad = sheds.findIndex((s) => !(Number(s.length) >= 1 && Number(s.length) <= 1000) || !(Number(s.width) >= 1 && Number(s.width) <= 1000));
     if (mode === 'map' && !pos) { setErr('Set the project location first: paste a Google Maps link and press Find, or click on the map.'); return; }
-    if (mode === 'shed' && (!(L >= 1 && L <= 1000) || !(W >= 1 && W <= 1000))) { setErr('Enter the shed length and width in metres.'); return; }
+    if (mode === 'shed' && bad >= 0) { setAt(bad); setErr(`Enter the length and width of shed ${bad + 1} in metres.`); return; }
     if (!f.name.trim()) { setErr('Enter a project name.'); return; }
     if (!f.clientName.trim()) { setErr('Enter the client name.'); return; }
     if (f.email && !/^\S+@\S+\.\S+$/.test(f.email)) { setErr('The email address does not look right.'); return; }
     setBusy('create'); setErr('');
     try {
       if (mode === 'shed') {
-        const r = await api('/api/projects', 'POST', { ...f, ...(pos || {}), noMap: true, shed: { length: L, width: W, height: Number(shed.height), tilt: Number(shed.tilt), slopeAz: shed.slopeAz, setback: Number(shed.setback) } });
+        const r = await api('/api/projects', 'POST', { ...f, ...(pos || {}), noMap: true, gap: Number(gap), sheds: sheds.map((s) => ({ length: Number(s.length), width: Number(s.width), height: Number(s.height), tilt: Number(s.tilt), slopeAz: s.slopeAz, setback: Number(s.setback) })) });
         router.push(`/designs/${r.project.designs[0].id}/edit`); // straight to the editor: the shed is already there
         return;
       }
@@ -127,14 +133,28 @@ export default function CreateProject({ onClose }: { onClose: () => void }) {
               </p>
               </>) : (
                 <div>
+                  <div className="shed-tabs">
+                    {sheds.map((_, i) => <button key={i} className={i === at ? 'on' : ''} onClick={() => setAt(i)}>Shed {i + 1}</button>)}
+                    {sheds.length < 20 && <button className="add" onClick={addShed} title="Add another shed with the same size, then change it">+ Add shed</button>}
+                  </div>
                   <div className="shed-form">
                   <svg className="shed-plan" viewBox="0 0 200 110" role="img" aria-label="Shed outline">
                     {(() => {
-                      const L = Math.max(Number(shed.length) || 1, 1), W = Math.max(Number(shed.width) || 1, 1), k = Math.min(150 / L, 70 / W), w = L * k, h = W * k, x = 100 - w / 2, y = 52 - h / 2;
+                      const dims = sheds.map((s) => ({ L: Math.max(Number(s.length) || 1, 1), W: Math.max(Number(s.width) || 1, 1) }));
+                      const G = sheds.length > 1 ? Math.max(Number(gap) || 0, 0) : 0, total = dims.reduce((s, d) => s + d.L, 0) + G * (dims.length - 1), deep = Math.max(...dims.map((d) => d.W));
+                      const k = Math.min(150 / total, 70 / deep);
+                      let x = 100 - (total * k) / 2;
+                      const one = dims.length === 1;
                       return <>
-                        <rect x={x} y={y} width={w} height={h} rx="2" fill="rgba(240,140,0,.12)" stroke="var(--sun-d)" strokeWidth="1.5" />
-                        <text x="100" y={y + h + 12} textAnchor="middle" fontSize="9" fill="var(--ink2)">{shed.length || 0} m (east–west)</text>
-                        <text x={x - 5} y="54" textAnchor="end" fontSize="9" fill="var(--ink2)">{shed.width || 0} m</text>
+                        {dims.map((d, i) => {
+                          const w = d.L * k, h = d.W * k, x0 = x, y = 52 - h / 2; x += (d.L + G) * k;
+                          return <g key={i} onClick={() => setAt(i)} style={{ cursor: 'pointer' }}>
+                            <rect x={x0} y={y} width={w} height={h} rx="2" fill={i === at ? 'rgba(240,140,0,.22)' : 'rgba(240,140,0,.08)'} stroke="var(--sun-d)" strokeWidth={i === at ? 1.8 : 1} />
+                            {!one && <text x={x0 + w / 2} y="55" textAnchor="middle" fontSize="9" fontWeight="700" fill="var(--ink2)">{i + 1}</text>}
+                            {one && <text x={x0 - 5} y="54" textAnchor="end" fontSize="9" fill="var(--ink2)">{shed.width || 0} m</text>}
+                          </g>;
+                        })}
+                        <text x="100" y={52 + (deep * k) / 2 + 12} textAnchor="middle" fontSize="9" fill="var(--ink2)">{one ? `${shed.length || 0} m (east–west)` : `${dims.length} sheds in a row, west to east · ${Math.round(total * 10) / 10} m in all`}</text>
                         <text x="192" y="12" textAnchor="end" fontSize="9" fontWeight="700" fill="var(--ink2)">N ↑</text>
                       </>;
                     })()}
@@ -149,9 +169,13 @@ export default function CreateProject({ onClose }: { onClose: () => void }) {
                     </div>
                   )}
                   <div className="field"><label>Edge margin<br /><span className="muted small">kept free of panels, m</span></label><input className="input" type="number" min={0} step={0.05} value={shed.setback} onChange={(e) => sh('setback', e.target.value)} /></div>
+                  {sheds.length > 1 && <>
+                    <div className="field"><label>Gap between sheds<br /><span className="muted small">same for all, m</span></label><input className="input" type="number" min={0} step={0.5} value={gap} onChange={(e) => setGap(e.target.value)} /></div>
+                    <div className="field"><label>Shed {at + 1}</label><button className="btn" onClick={dropShed}>Remove this shed</button></div>
+                  </>}
                   </div>
                   <p className="muted small" style={{ marginTop: 8 }}>
-                    The project opens in the editor with this shed on plain ground, ready for panels. Everything can be changed there.{' '}
+                    The project opens in the editor with {sheds.length > 1 ? `these ${sheds.length} sheds` : 'this shed'} on plain ground, ready for panels. Everything can be changed there, and more sheds can be added.{' '}
                     {pos ? <>Sun and weather data: <b>{f.address || `${pos.lat.toFixed(3)}, ${pos.lng.toFixed(3)}`}</b>.</> : <>No town set: generation figures will use central India and are only approximate. Add the nearest town for accurate figures.</>}
                   </p>
                 </div>
