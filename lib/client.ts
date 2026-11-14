@@ -12,6 +12,16 @@ export async function api<T = any>(url: string, method = 'GET', body?: any): Pro
   return data as T;
 }
 
+// The last answer to each GET, kept for this visit. A screen shows it straight away and then loads the fresh one.
+const kept = new Map<string, any>();
+export const peek = <T = any>(url: string): T | null => (kept.has(url) ? (kept.get(url) as T) : null);
+export async function apiKeep<T = any>(url: string): Promise<T> {
+  const r = await api<T>(url);
+  kept.set(url, r);
+  return r;
+}
+export const forget = (prefix = '') => { for (const k of [...kept.keys()]) if (k.startsWith(prefix)) kept.delete(k); };
+
 export const fmt = (n: number, d = 2) => (isFinite(n) ? n.toLocaleString('en-IN', { minimumFractionDigits: d, maximumFractionDigits: d }) : '-');
 export const fmt0 = (n: number) => fmt(n, 0);
 export const fmtDate = (iso: string) => new Date(iso).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });

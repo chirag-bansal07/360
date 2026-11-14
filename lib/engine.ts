@@ -147,7 +147,10 @@ export class Engine {
   private results: Results | null = null;
   private orthoSize = 80;
   private dirty = true;
+  private shadowDirty = true;
   private raf = 0;
+  private moveRaf = 0;
+  private pendingMove: PointerEvent | null = null;
   private ro: ResizeObserver;
   private disposed = false;
   private pic: THREE.Group | null = null; // Google Solar API picture of the site
@@ -161,9 +164,10 @@ export class Engine {
   private drawGroup = new THREE.Group();
 
   constructor(private el: HTMLElement, private opts: { lat: number; lng: number; interactive: boolean; plain?: boolean; share?: string; picture?: 'auto' | 'solar' | 'tiles'; ground?: { span: number; x: number; z: number } }, private events: EngineEvents = {}) {
-    this.renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+    this.renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
     this.renderer.shadowMap.enabled = true;
+    this.renderer.shadowMap.autoUpdate = false; // shadows are redrawn only when the layout or the sun changes, not on every camera move
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     this.scene.background = new THREE.Color('#dfe5ea');
     el.appendChild(this.renderer.domElement);
@@ -199,7 +203,11 @@ export class Engine {
     const loop = () => {
       if (this.disposed) return;
       this.raf = requestAnimationFrame(loop);
-      if (this.dirty) { this.dirty = false; this.renderer.render(this.scene, this.camera); }
+      if (this.dirty) {
+        this.dirty = false;
+        if (this.shadowDirty) { this.shadowDirty = false; this.renderer.shadowMap.needsUpdate = true; }
+        this.renderer.render(this.scene, this.camera);
+      }
     };
     loop();
     this.ready = this.loadImagery();
@@ -524,7 +532,7 @@ export class Engine {
     d.walkways.forEach((o) => box(o, 'walkway'));
     this.applySelection();
     this.applySun();
-    this.dirty = true;
+    this.dirty = true; this.shadowDirty = true;
   }
 
   // ---------- state ----------
@@ -554,7 +562,7 @@ export class Engine {
   }
   setColorMode(m: ColorMode) { if (m !== this.colorMode) { this.colorMode = m; this.rebuild(); } }
   setResults(r: Results | null) { this.results = r; if (this.colorMode !== 'normal') this.rebuild(); }
-  setSun(dir: [number, number, number] | null) { this.sunDir = dir; this.applySun(); this.dirty = true; }
+  setSun(dir: [number, number, number] | null) { this.sunDir = dir; this.applySun(); this.dirty = true; this.shadowDirty = true; }
 
   private applySun() {
     const dir = this.sunDir;
@@ -766,6 +774,17 @@ export class Engine {
   };
 
   private onMove = (e: PointerEvent) => {
+    this.pendingMove = e;
+    if (!this.moveRaf) this.moveRaf = requestAnimationFrame(this.flushMove);
+  };
+  private flushMove = () => {
+    cancelAnimationFrame(this.moveRaf);
+    this.moveRaf = 0;
+    const e = this.pendingMove;
+    this.pendingMove = null;
+    if (e && !this.disposed) this.handleMove(e);
+  };
+  private handleMove(e: PointerEvent) {
     if (this.vdrag) {
       this.ray.setFromCamera(this.ndc(e), this.camera);
       const p = new THREE.Vector3();
@@ -793,7 +812,7 @@ export class Engine {
       const ok = (x: number, z: number) => !this.events.canMove || this.events.canMove(dr.sel, x, z);
       // a place the item may not stand on is skipped; it slides along the limit where it can
       const to = ok(nx, nz) ? [nx, nz] : nx !== o.x && ok(nx, o.z) ? [nx, o.z] : nz !== o.z && ok(o.x, nz) ? [o.x, nz] : null;
-      if (to) { o.x = to[0]; o.z = to[1]; dr.placed = true; this.dirty = true; }
+      if (to) { o.x = to[0]; o.z = to[1]; dr.placed = true; this.dirty = true; this.shadowDirty = true; }
       return;
     }
     if (e.buttons) return;
@@ -805,9 +824,10 @@ export class Engine {
     } else if (this.opts.interactive) {
       this.renderer.domElement.style.cursor = hit?.object.userData.sel ? (hit.object.userData.locked ? 'pointer' : 'grab') : 'default';
     }
-  };
+  }
 
   private onUp = (e: PointerEvent) => {
+    if (this.pendingMove) this.flushMove(); // the last move before the button was released still counts
     const click = !!this.down && Math.hypot(e.clientX - this.down.x, e.clientY - this.down.y) < 4;
     this.down = null;
     if (this.vdrag) {
@@ -874,6 +894,7 @@ export class Engine {
     const w = this.el.clientWidth, h = this.el.clientHeight;
     this.renderer.setPixelRatio(1);
     this.renderer.setSize(size, size, false);
+    this.renderer.shadowMap.needsUpdate = true;
     this.renderer.render(this.scene, cam);
     const url = this.renderer.domElement.toDataURL('image/jpeg', o.quality || 0.88);
     this.renderer.setPixelRatio(pr);
@@ -881,6 +902,7 @@ export class Engine {
     this.sunDir = keep.sun; this.colorMode = keep.mode; this.selected = keep.sel; this.tool = keep.tool;
     this.rebuild();
     this.ghosts.forEach((g) => (g.visible = this.tool === 'panels'));
+    this.renderer.shadowMap.needsUpdate = true;
     this.renderer.render(this.scene, this.camera);
     return url;
   }
@@ -888,6 +910,7 @@ export class Engine {
   dispose() {
     this.disposed = true;
     cancelAnimationFrame(this.raf);
+    cancelAnimationFrame(this.moveRaf);
     this.ro.disconnect();
     this.controls.dispose();
     this.clearContent();

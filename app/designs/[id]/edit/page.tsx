@@ -411,11 +411,13 @@ export default function Editor() {
     return sunVector(project.lat, n, clockToSolar(hour, n, project.lng, project.utcOffset));
   }, [sunOn, month, hour, project]);
 
+  const totalsNow = useMemo(() => (design ? designTotals(design, mods) : null), [design, mods]);
+
   if (!design || !project) {
     return <div className="ed" style={{ display: 'grid', placeItems: 'center', gridTemplateColumns: '1fr', gridTemplateRows: '1fr' }}>{error ? <div className="eerr">{error} <Link href="/projects"><u>Back to projects</u></Link></div> : 'Loading design…'}</div>;
   }
 
-  const totals = designTotals(design, mods);
+  const totals = totalsNow!;
   const block = sel?.kind === 'block' ? design.blocks.find((b) => b.id === sel.id) : null;
   const obst = sel?.kind === 'obstruction' ? design.obstructions.find((o) => o.id === sel.id) : null;
   const walk = sel?.kind === 'walkway' ? design.walkways.find((o) => o.id === sel.id) : null;

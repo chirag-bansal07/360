@@ -10,11 +10,13 @@ const Icon = ({ d }: { d: string }) => (
 // The company's own name and logo, loaded once and kept for the rest of the visit.
 type Company = { name: string; logo: string };
 let company: Company | null = null;
+type Me = { hosted: boolean; user: { email: string; name: string; role?: string } | null };
+let meKept: Me | null = null;
 export function setCompany(c: Company) { company = c; if (typeof window !== 'undefined') window.dispatchEvent(new Event('company-changed')); }
 
 export default function Shell({ children }: { children: ReactNode }) {
   const path = usePathname();
-  const [me, setMe] = useState<{ hosted: boolean; user: { email: string; name: string; role?: string } | null } | null>(null);
+  const [me, setMe] = useState<Me | null>(meKept);
   const [co, setCo] = useState<Company | null>(company);
   useEffect(() => {
     const sync = () => setCo(company);
@@ -22,7 +24,7 @@ export default function Shell({ children }: { children: ReactNode }) {
     if (!company) fetch('/api/settings').then((r) => (r.ok ? r.json() : null)).then((d) => { if (d?.settings?.company) setCompany(d.settings.company); }).catch(() => {});
     return () => window.removeEventListener('company-changed', sync);
   }, []);
-  useEffect(() => { fetch('/api/auth/me').then((r) => r.json()).then(setMe).catch(() => {}); }, []);
+  useEffect(() => { if (!meKept) fetch('/api/auth/me').then((r) => r.json()).then((m) => { meKept = m; setMe(m); }).catch(() => {}); }, []);
   const signOut = async () => { await fetch('/api/auth/logout', { method: 'POST' }).catch(() => {}); window.location.href = '/login'; };
   const on = (p: string) => (p === '/' ? path === '/' : path.startsWith(p));
   return (

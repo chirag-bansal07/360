@@ -18,26 +18,28 @@ export function ensureSchema(): Promise<void> {
   if (!ready) {
     ready = (async () => {
       const q = sql();
-      await q`create table if not exists users (
+      await q.transaction([
+      q`create table if not exists users (
         id text primary key, email text not null unique, name text not null default '', pass text not null,
-        failed int not null default 0, locked_until timestamptz, created_at timestamptz not null default now())`;
-      await q`alter table users add column if not exists sv int not null default 0`; // session version: raised on sign-out
+        failed int not null default 0, locked_until timestamptz, created_at timestamptz not null default now())`,
+      q`alter table users add column if not exists sv int not null default 0`, // session version: raised on sign-out
       // role: 'admin' runs the app (Google key), 'company' is a normal sign-up. The admin is set directly in the database, never through sign-up.
-      await q`alter table users add column if not exists role text not null default 'company'`;
+      q`alter table users add column if not exists role text not null default 'company'`,
       // solar: this login may use the Google Solar API aerial picture. Off for everyone unless switched on for that login in the database.
-      await q`alter table users add column if not exists solar boolean not null default false`;
-      await q`create unique index if not exists users_one_admin on users ((true)) where role = 'admin'`; // never more than one admin
-      await q`create table if not exists app_settings (key text primary key, value text not null)`;
-      await q`create table if not exists workspaces (
-        user_id text primary key references users(id) on delete cascade, data jsonb not null, updated_at timestamptz not null default now())`;
+      q`alter table users add column if not exists solar boolean not null default false`,
+      q`create unique index if not exists users_one_admin on users ((true)) where role = 'admin'`, // never more than one admin
+      q`create table if not exists app_settings (key text primary key, value text not null)`,
+      q`create table if not exists workspaces (
+        user_id text primary key references users(id) on delete cascade, data jsonb not null, updated_at timestamptz not null default now())`,
       // share links: kind 'view' = live 3D link to a design, 'report' = a saved report with its own copy of the data
-      await q`create table if not exists shares (
+      q`create table if not exists shares (
         token text primary key, user_id text not null references users(id) on delete cascade, kind text not null,
-        project_id text not null, design_id text not null, meta jsonb, data jsonb, created_at timestamptz not null default now())`;
-      await q`create index if not exists shares_owner on shares (user_id, project_id)`;
+        project_id text not null, design_id text not null, meta jsonb, data jsonb, created_at timestamptz not null default now())`,
+      q`create index if not exists shares_owner on shares (user_id, project_id)`,
       // Google Solar API pictures, kept per site so each one is paid for once
-      await q`create table if not exists solar_pics (k text primary key, meta jsonb not null, jpeg text, created_at timestamptz not null default now())`;
-      await q`create table if not exists rate_limits (key text primary key, n int not null, reset_at timestamptz not null)`;
+      q`create table if not exists solar_pics (k text primary key, meta jsonb not null, jpeg text, created_at timestamptz not null default now())`,
+      q`create table if not exists rate_limits (key text primary key, n int not null, reset_at timestamptz not null)`,
+      ]);
     })().catch((e) => { ready = null; throw e; });
   }
   return ready;

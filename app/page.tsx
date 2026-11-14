@@ -2,12 +2,12 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import Shell from '@/components/Shell';
-import { api, fmtDate } from '@/lib/client';
+import { api, fmtDate, apiKeep, peek } from '@/lib/client';
 
 export default function Dashboard() {
-  const [list, setList] = useState<any[] | null>(null);
+  const [list, setList] = useState<any[] | null>(() => peek('/api/projects')?.projects ?? null);
   const [err, setErr] = useState('');
-  useEffect(() => { api('/api/projects').then((r) => setList(r.projects)).catch((e) => setErr(e.message)); }, []);
+  useEffect(() => { apiKeep('/api/projects').then((r) => setList(r.projects)).catch((e) => setErr(e.message)); }, []);
   const designs = (list || []).reduce((s, p) => s + p.designCount, 0);
   const commercial = (list || []).filter((p) => p.type === 'commercial').length;
   return (

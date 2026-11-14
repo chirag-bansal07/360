@@ -5,23 +5,23 @@ import { useParams, useRouter } from 'next/navigation';
 import Shell from '@/components/Shell';
 import Confirm from '@/components/Confirm';
 import ShareDialog, { ShareIcon } from '@/components/ShareDialog';
-import { api, fmtDate, fmtDateTime, fmt, fmt0 } from '@/lib/client';
+import { api, fmtDate, fmtDateTime, fmt, fmt0, apiKeep, peek } from '@/lib/client';
 import { allModules } from '@/lib/catalog';
 import { designTotals } from '@/lib/geometry';
 
 export default function ProjectPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
-  const [data, setData] = useState<any>(null);
+  const [data, setData] = useState<any>(() => peek(`/api/projects/${id}`));
   const [err, setErr] = useState('');
   const [edit, setEdit] = useState<any>(null);
   const [del, setDel] = useState<any>(null);
   const [busy, setBusy] = useState(false);
-  const [reports, setReports] = useState<any[] | null>(null);
+  const [reports, setReports] = useState<any[] | null>(() => peek(`/api/projects/${id}/reports`)?.reports ?? null);
   const [share, setShare] = useState<{ kind: 'view' | 'report'; url: string; name: string; designId?: string } | null>(null);
   const [delReport, setDelReport] = useState<any>(null);
-  const loadReports = () => api(`/api/projects/${id}/reports`).then((r) => setReports(r.reports)).catch((e) => setErr(e.message));
-  const load = () => api(`/api/projects/${id}`).then(setData).catch((e) => setErr(e.message));
+  const loadReports = () => apiKeep(`/api/projects/${id}/reports`).then((r) => setReports(r.reports)).catch((e) => setErr(e.message));
+  const load = () => apiKeep(`/api/projects/${id}`).then(setData).catch((e) => setErr(e.message));
   useEffect(() => { load(); loadReports(); }, [id]);
 
   if (!data) return <Shell>{err ? <div className="error">{err} <Link href="/projects"><u>Back to projects</u></Link></div> : <p className="muted">Loading…</p>}</Shell>;

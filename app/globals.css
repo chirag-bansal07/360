@@ -130,7 +130,7 @@ label.small { display: block; margin-bottom: .25rem; }
 .modal-body { padding: 1.375rem; }
 .modal-foot { padding: .875rem 1.375rem; border-top: 1px solid var(--hair); display: flex; justify-content: flex-end; gap: .625rem; }
 @keyframes scrim-in { from { opacity: 0; } }
-@keyframes sheet-in { from { opacity: 0; transform: scale(.96) translateY(8px); filter: blur(6px); } }
+@keyframes sheet-in { from { opacity: 0; transform: scale(.96) translateY(8px); } }
 .shed-tabs { display: flex; flex-wrap: wrap; gap: .375rem; margin-bottom: .5rem; }
 .shed-tabs button { border: 1px solid var(--hair); background: #fff; color: var(--ink); border-radius: 999px; padding: .25rem .75rem; font-size: .8125rem; font-weight: 500; cursor: pointer; }
 .shed-tabs button.on { border-color: var(--sun-d); background: rgba(240, 140, 0, .12); font-weight: 600; }
@@ -403,3 +403,10 @@ label.small { display: block; margin-bottom: .25rem; }
 .login-card .switch-mode { text-align: center; margin: 1rem 0 0; }
 .login-card .switch-mode a { color: var(--sun-d); font-weight: 500; }
 .login-card .switch-mode a:hover { text-decoration: underline; }
+
+/* ---------- speed: plain backgrounds instead of blur-behind ----------
+   Blur behind a panel is worked out again on every frame of the 3D view and on every scroll, which makes weaker
+   graphics cards stutter. Every panel has a plain background instead. */
+.side { background: #f2f2f5; } .modal, .modal-head, .viewer-top, .report-bar { background: #fff; } .viewer-side { background: #fafafc; }
+.ed-top { background: var(--ed-panel); } .hint, .compass, .hover-tip { background: #1c1c1e; } .modal-back { background: rgba(0, 0, 0, .45); }
+.side, .modal, .modal-head, .modal-back, .viewer-top, .viewer-side, .ed-top, .hint, .compass, .hover-tip, .report-bar { -webkit-backdrop-filter: none; backdrop-filter: none; }

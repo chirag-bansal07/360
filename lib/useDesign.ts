@@ -20,7 +20,7 @@ export function useDesign(id: string | undefined, share?: string) {
   }, [id, share]);
 
   const mods = useMemo(() => allModules(settings), [settings]);
-  const stale = !!design?.results && design.results.signature !== designSignature(design);
+  const stale = useMemo(() => !!design?.results && design.results.signature !== designSignature(design), [design]);
 
   // beforeCalc lets the editor finish saving first
   const calculate = useCallback(async (beforeCalc?: () => Promise<void>) => {

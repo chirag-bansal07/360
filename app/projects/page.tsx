@@ -4,16 +4,16 @@ import { useRouter } from 'next/navigation';
 import Shell from '@/components/Shell';
 import CreateProject from '@/components/CreateProject';
 import Confirm from '@/components/Confirm';
-import { api, fmtDate } from '@/lib/client';
+import { api, fmtDate, apiKeep, peek } from '@/lib/client';
 
 export default function Projects() {
   const router = useRouter();
-  const [list, setList] = useState<any[] | null>(null);
+  const [list, setList] = useState<any[] | null>(() => peek('/api/projects')?.projects ?? null);
   const [q, setQ] = useState('');
   const [creating, setCreating] = useState(false);
   const [del, setDel] = useState<any>(null);
   const [err, setErr] = useState('');
-  const load = () => api('/api/projects').then((r) => setList(r.projects)).catch((e) => setErr(e.message));
+  const load = () => apiKeep('/api/projects').then((r) => setList(r.projects)).catch((e) => setErr(e.message));
   useEffect(() => {
     load();
     if (new URLSearchParams(location.search).get('new')) setCreating(true);
