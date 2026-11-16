@@ -1,5 +1,5 @@
-import { readDb, writeDb, json, fail, getGoogleKey, setGoogleKey } from '@/lib/store';
-import { isAdmin } from '@/lib/auth';
+import { readDb, writeDb, json, fail, getGoogleKey, setGoogleKey, settingsOut, isLogoUrl } from '@/lib/store';
+import { isAdmin, guard } from '@/lib/auth';
 import { DEFAULT_LOSSES } from '@/lib/catalog';
 
 export const dynamic = 'force-dynamic';
@@ -8,19 +8,21 @@ export const dynamic = 'force-dynamic';
 // Only the admin can see that a key exists or change it. Company logins get no key information at all.
 async function masked(s: any) {
   const admin = await isAdmin();
-  return { ...s, googleMapsKey: '', canSetKey: admin, hasGoogleKey: admin ? !!(await getGoogleKey()) : false };
+  return { ...settingsOut(s), canSetKey: admin, hasGoogleKey: admin ? !!(await getGoogleKey()) : false };
 }
 
-export async function GET() {
+export const GET = guard(async function GET() {
   return json({ settings: await masked((await readDb()).settings) });
-}
+});
 
-export async function PUT(req: Request) {
+export const PUT = guard(async function PUT(req: Request) {
   const b = await req.json();
   const db = (await readDb());
   const s = db.settings;
   if (b.company) {
-    const logo = String(b.company.logo || '');
+    let logo = String(b.company.logo || '');
+    if (isLogoUrl(logo)) logo = s.company.logo; // the screen sends back the address it was given: the logo is unchanged
+    else if (logo && !logo.startsWith('data:image/')) return fail('The logo must be an image file.');
     if (logo.length > 700000) return fail('The logo file is too large. Use an image under 500 KB.');
     s.company = { name: String(b.company.name || '').trim() || 'SunCraft3D', email: String(b.company.email || '').trim(), phone: String(b.company.phone || '').trim(), logo };
   }
@@ -52,4 +54,4 @@ export async function PUT(req: Request) {
     await setGoogleKey(b.removeGoogleKey === true ? '' : newKey);
   }
   return json({ settings: await masked((await readDb()).settings) });
-}
+});

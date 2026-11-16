@@ -5,7 +5,7 @@ import { useParams, useRouter } from 'next/navigation';
 import Shell from '@/components/Shell';
 import Confirm from '@/components/Confirm';
 import ShareDialog, { ShareIcon } from '@/components/ShareDialog';
-import { api, fmtDate, fmtDateTime, fmt, fmt0, apiKeep, peek } from '@/lib/client';
+import { api, fmtDate, fmtDateTime, fmt, fmt0, apiKeep, peek, preload, stored } from '@/lib/client';
 import { allModules } from '@/lib/catalog';
 import { designTotals } from '@/lib/geometry';
 
@@ -22,7 +22,12 @@ export default function ProjectPage() {
   const [delReport, setDelReport] = useState<any>(null);
   const loadReports = () => apiKeep(`/api/projects/${id}/reports`).then((r) => setReports(r.reports)).catch((e) => setErr(e.message));
   const load = () => apiKeep(`/api/projects/${id}`).then(setData).catch((e) => setErr(e.message));
-  useEffect(() => { load(); loadReports(); }, [id]);
+  useEffect(() => {
+    setData((d: any) => d || stored(`/api/projects/${id}`));
+    setReports((r) => r || (stored(`/api/projects/${id}/reports`)?.reports ?? null));
+    load(); loadReports();
+  }, [id]);
+  const warm = (did: string) => preload(`/api/designs/${did}`); // the design starts loading while the pointer is over its card
 
   if (!data) return <Shell>{err ? <div className="error">{err} <Link href="/projects"><u>Back to projects</u></Link></div> : <p className="muted">Loading…</p>}</Shell>;
   const p = data.project, mods = allModules(data.settings);
@@ -81,12 +86,12 @@ export default function ProjectPage() {
             const t = designTotals(d, mods);
             return (
               <div className="design-card" key={d.id}>
-                <Link href={`/designs/${d.id}`}><div className="pic" style={d.thumb ? { backgroundImage: `url(${d.thumb})` } : undefined}>{!d.thumb && 'Empty design'}</div></Link>
+                <Link href={`/designs/${d.id}`} onMouseEnter={() => warm(d.id)}><div className="pic" style={d.thumb ? { backgroundImage: `url(${d.thumb})` } : undefined}>{!d.thumb && 'Empty design'}</div></Link>
                 <div className="foot" style={{ flexDirection: 'column', alignItems: 'stretch' }}>
                   <Link href={`/designs/${d.id}`}><b>{d.name}</b><div className="muted small">{t.modules ? `${fmt(t.kwp)} kWp · ${t.modules} modules` : 'No panels yet'}</div></Link>
                   <div className="row" style={{ gap: 4, justifyContent: 'flex-end', flexWrap: 'nowrap' }}>
                     <button className="icon-btn" title="Share the 3D model link" aria-label={`Share the 3D model link of ${d.name}`} onClick={() => shareDesign(d)}><ShareIcon /></button>
-                    <Link className="icon-btn" title="Edit design" href={`/designs/${d.id}/edit`}>✎</Link>
+                    <Link className="icon-btn" title="Edit design" href={`/designs/${d.id}/edit`} onMouseEnter={() => warm(d.id)}>✎</Link>
                     <button className="icon-btn" title="Duplicate design" disabled={busy} onClick={() => addDesign(d.id)}>⧉</button>
                     <button className="icon-btn danger" title="Delete design" onClick={() => setDel(d)}>🗑</button>
                   </div>

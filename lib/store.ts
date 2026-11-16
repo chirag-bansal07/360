@@ -88,5 +88,34 @@ export function findDesign(db: Db, designId: string): { project: Project; design
   return null;
 }
 
+// Pictures are not sent inside the data. A screen gets a short address instead and the browser keeps the picture:
+// the address changes whenever the picture does.
+export const thumbUrl = (d: { id: string; thumb?: string; updatedAt?: string }) =>
+  (d.thumb ? `/api/designs/${d.id}/thumb?v=${Date.parse(d.updatedAt || '') || 0}` : '');
+const LOGO = '/api/logo?v=';
+export const isLogoUrl = (v: string) => v.startsWith(LOGO);
+function stamp(text: string): string {
+  let h = 2166136261;
+  for (let i = 0; i < text.length; i++) { h ^= text.charCodeAt(i); h = Math.imul(h, 16777619); }
+  return (h >>> 0).toString(36) + text.length.toString(36);
+}
+// Settings as the signed-in screens receive them: no key, and the logo as an address.
+export function settingsOut<T extends { company: { logo: string } }>(s: T): T {
+  const logo = s.company.logo || '';
+  return { ...s, googleMapsKey: '', company: { ...s.company, logo: logo.startsWith('data:') ? LOGO + stamp(logo) : logo } };
+}
+// A picture kept as a data address, sent as the picture itself.
+export function pictureResponse(dataUrl: string | undefined): Response {
+  const m = /^data:(image\/(?:png|jpeg|webp|gif|svg\+xml));base64,([A-Za-z0-9+/=]+)$/.exec(dataUrl || '');
+  if (!m) return new Response('no picture', { status: 404 });
+  return new Response(new Uint8Array(Buffer.from(m[2], 'base64')), {
+    headers: {
+      'Content-Type': m[1], 'Cache-Control': 'private, max-age=31536000, immutable',
+      // an uploaded SVG is only ever a picture: opened on its own it may not run scripts
+      'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; sandbox", 'X-Content-Type-Options': 'nosniff',
+    },
+  });
+}
+
 export const json = (data: any, status = 200) => Response.json(data, { status });
 export const fail = (message: string, status = 400) => Response.json({ error: message }, { status });

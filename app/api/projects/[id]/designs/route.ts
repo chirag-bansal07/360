@@ -1,9 +1,10 @@
 import { readDb, writeDb, json, fail } from '@/lib/store';
+import { guard } from '@/lib/auth';
 import { newDesign, uid } from '@/lib/catalog';
 
 export const dynamic = 'force-dynamic';
 
-export async function POST(req: Request, ctx: { params: Promise<{ id: string }> }) {
+export const POST = guard(async function POST(req: Request, ctx: { params: Promise<{ id: string }> }) {
   const { id } = await ctx.params;
   const b = await req.json().catch(() => ({}));
   const db = (await readDb());
@@ -19,5 +20,5 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
   }
   project.designs.push(design);
   await writeDb(db);
-  return json({ design });
-}
+  return json({ design: { ...design, thumb: '' } });
+});

@@ -1,5 +1,5 @@
-// Signed login cookie. The signature is checked without the database; the request guard (proxy.ts)
-// also compares the session version with the database, so signing out cancels every existing cookie.
+// Signed login cookie. The signature is checked without the database (request guard, proxy.ts); the API handlers
+// also compare the session version with the database (lib/auth.ts), so signing out cancels every existing cookie.
 import { createHmac, timingSafeEqual } from 'crypto';
 
 export const HOSTED = process.env.VERCEL === '1'; // on Vercel: database storage and login. On this computer: local file, no login.

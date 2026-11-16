@@ -1,6 +1,7 @@
 'use client';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { api } from './client';
+import { api, apiRecent } from './client';
+import { imageryInfo } from './imageryInfo';
 import { allModules } from './catalog';
 import { designSignature } from './geometry';
 import type { Design, Project, Results, Settings } from './types';
@@ -16,7 +17,11 @@ export function useDesign(id: string | undefined, share?: string) {
   const [sharedAt, setSharedAt] = useState('');
 
   useEffect(() => {
-    api(share ? `/api/share/${share}` : `/api/designs/${id}`).then((r) => { setDesign(r.design); setProject(r.project); setSettings(r.settings); setSharedAt(r.createdAt || ''); }).catch((e) => setError(e.message));
+    (share ? api(`/api/share/${share}`) : apiRecent(`/api/designs/${id}`)).then((r) => {
+      // the satellite source is asked for now, so it is known by the time the 3D scene starts
+      if (r.project && !r.project.noMap) imageryInfo(share ? `/api/share/${share}` : '/api', r.project.lat, r.project.lng).catch(() => {});
+      setDesign(r.design); setProject(r.project); setSettings(r.settings); setSharedAt(r.createdAt || '');
+    }).catch((e) => setError(e.message));
   }, [id, share]);
 
   const mods = useMemo(() => allModules(settings), [settings]);

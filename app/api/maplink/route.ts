@@ -1,7 +1,7 @@
 import { json, fail } from '@/lib/store';
 import { parseLatLng, placeName, isGoogleMapsHost } from '@/lib/maplink';
 import { findPlace } from '@/lib/geosearch';
-import { searchAllowed } from '@/lib/auth';
+import { searchAllowed, guard } from '@/lib/auth';
 
 export const dynamic = 'force-dynamic';
 
@@ -11,7 +11,7 @@ const NO_PIN = 'This link does not carry an exact position (links shared from th
 // Coordinates are only ever read from the link itself. The Google page behind a link is never searched for numbers:
 // it holds the map view Google guesses for whoever opens it (this server), not the place in the link.
 // A link with only a place name is looked up by that name and offered as choices, never placed silently.
-export async function POST(req: Request) {
+export const POST = guard(async function POST(req: Request) {
   const { text } = await req.json();
   const t = String(text || '').trim();
   if (!t) return fail('Paste a Google Maps link first.');
@@ -47,4 +47,4 @@ export async function POST(req: Request) {
   } catch {
     return fail(NO_PIN, 502);
   }
-}
+});

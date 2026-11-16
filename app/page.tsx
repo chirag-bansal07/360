@@ -1,13 +1,20 @@
 'use client';
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import Shell from '@/components/Shell';
-import { api, fmtDate, apiKeep, peek } from '@/lib/client';
+import { fmtDate, apiKeep, peek, preload, stored } from '@/lib/client';
 
 export default function Dashboard() {
+  const router = useRouter();
   const [list, setList] = useState<any[] | null>(() => peek('/api/projects')?.projects ?? null);
   const [err, setErr] = useState('');
-  useEffect(() => { apiKeep('/api/projects').then((r) => setList(r.projects)).catch((e) => setErr(e.message)); }, []);
+  useEffect(() => {
+    setList((l) => l || (stored('/api/projects')?.projects ?? null));
+    apiKeep('/api/projects').then((r) => setList(r.projects)).catch((e) => setErr(e.message));
+  }, []);
+  // the project page and its data start loading while the pointer is over the row
+  const warm = (id: string) => { router.prefetch(`/projects/${id}`); preload(`/api/projects/${id}`); preload(`/api/projects/${id}/reports`); };
   const designs = (list || []).reduce((s, p) => s + p.designCount, 0);
   const commercial = (list || []).filter((p) => p.type === 'commercial').length;
   return (
@@ -27,8 +34,8 @@ export default function Dashboard() {
         ) : (
           <table className="table"><tbody>
             {(list || []).slice(0, 6).map((p) => (
-              <tr key={p.id} className="click" onClick={() => (location.href = `/projects/${p.id}`)}>
-                <td style={{ width: 80 }}>{p.thumb ? <img className="thumb" src={p.thumb} alt="" /> : <div className="thumb" />}</td>
+              <tr key={p.id} className="click" onMouseEnter={() => warm(p.id)} onClick={() => router.push(`/projects/${p.id}`)}>
+                <td style={{ width: 80 }}>{p.thumb ? <img className="thumb" src={p.thumb} alt="" loading="lazy" /> : <div className="thumb" />}</td>
                 <td><b>{p.name}</b><span className="badge">{p.number}</span><div className="muted small">{p.address}</div></td>
                 <td>{p.clientName}</td>
                 <td className="muted">{fmtDate(p.createdAt)}</td>

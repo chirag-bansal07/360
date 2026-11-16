@@ -12,7 +12,7 @@ const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', '
 // solar = this login may use the aerial picture at all; without it only map tiles are used.
 // mayFetch guards the paid first fetch of a site's aerial picture (see solarInfo).
 export async function pickImagery(lat: number, lng: number, key: string, solar = false, mayFetch?: () => Promise<boolean>) {
-  const base = await pickTiles(lat, lng, key);
+  const base = await pickTilesKept(lat, lng, key);
   if (!solar) return { ...base, overlay: null, tilesCredit: base.credit };
   let overlay: SolarPic | null = null, warning = base.warning;
   try {
@@ -24,6 +24,18 @@ export async function pickImagery(lat: number, lng: number, key: string, solar =
   const [y, m] = overlay.date.split('-').map(Number);
   const credit = `Imagery © Google${y ? ` (Solar API, ${MONTHS[(m || 1) - 1]} ${y})` : ''}${base.provider === 'google' ? '' : ` · surroundings ${base.credit.replace('Imagery ', '')}`}`;
   return { ...base, credit, warning: base.provider === 'google' ? '' : warning, overlay, tilesCredit: base.credit };
+}
+
+// The answer for a spot is remembered for ten minutes: finding it takes several requests to the imagery service.
+// An answer with a warning is not remembered, so a fault is looked at again the next time.
+const picked = new Map<string, { at: number; value: Awaited<ReturnType<typeof pickTiles>> }>();
+async function pickTilesKept(lat: number, lng: number, key: string) {
+  const k = `${lat.toFixed(5)},${lng.toFixed(5)},${key ? key.length + key.slice(-4) : ''}`;
+  const hit = picked.get(k);
+  if (hit && Date.now() - hit.at < 600000) return hit.value;
+  const value = await pickTiles(lat, lng, key);
+  if (!value.warning) { if (picked.size > 500) picked.clear(); picked.set(k, { at: Date.now(), value }); }
+  return value;
 }
 
 // The tile source and the sharpest zoom level that really has pictures at this spot.
@@ -67,7 +79,9 @@ export async function tileResponse(z: number, x: number, y: number, google: bool
     try {
       const res = await fetch(googleTileUrl(key, await googleSession(key), z, x, y), { signal: AbortSignal.timeout(20000) });
       if (!res.ok) return new Response('tile not available', { status: 404 });
-      return new Response(new Uint8Array(await res.arrayBuffer()), { headers: { 'Content-Type': res.headers.get('content-type') || 'image/jpeg', 'Cache-Control': 'private, max-age=3600' } });
+      // the browser keeps a tile for as long as Google allows (a day at the time of writing), so a design opened again loads its picture at once
+      const age = Math.min(86400, Math.max(3600, Number(/max-age=(d+)/.exec(res.headers.get('cache-control') || '')?.[1]) || 3600));
+      return new Response(new Uint8Array(await res.arrayBuffer()), { headers: { 'Content-Type': res.headers.get('content-type') || 'image/jpeg', 'Cache-Control': `private, max-age=${age}` } });
     } catch {
       return new Response('imagery not reachable', { status: 502 });
     }

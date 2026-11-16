@@ -4,7 +4,7 @@ import { useRouter } from 'next/navigation';
 import Shell from '@/components/Shell';
 import CreateProject from '@/components/CreateProject';
 import Confirm from '@/components/Confirm';
-import { api, fmtDate, apiKeep, peek } from '@/lib/client';
+import { api, fmtDate, apiKeep, peek, preload, stored } from '@/lib/client';
 
 export default function Projects() {
   const router = useRouter();
@@ -15,9 +15,12 @@ export default function Projects() {
   const [err, setErr] = useState('');
   const load = () => apiKeep('/api/projects').then((r) => setList(r.projects)).catch((e) => setErr(e.message));
   useEffect(() => {
+    setList((l) => l || (stored('/api/projects')?.projects ?? null));
     load();
     if (new URLSearchParams(location.search).get('new')) setCreating(true);
   }, []);
+  // the project page and its data start loading while the pointer is over the row
+  const warm = (id: string) => { router.prefetch(`/projects/${id}`); preload(`/api/projects/${id}`); preload(`/api/projects/${id}/reports`); };
   const shown = (list || []).filter((p) => `${p.name} ${p.clientName} ${p.address} ${p.number}`.toLowerCase().includes(q.trim().toLowerCase()));
 
   async function remove() {
@@ -42,8 +45,8 @@ export default function Projects() {
             <thead><tr><th colSpan={2}>Projects ({list ? shown.length : '…'})</th><th>Designs</th><th>Created on</th><th>Client name</th><th>Action</th></tr></thead>
             <tbody>
               {shown.map((p) => (
-                <tr key={p.id} className="click" onClick={() => router.push(`/projects/${p.id}`)}>
-                  <td style={{ width: 80 }}>{p.thumb ? <img className="thumb" src={p.thumb} alt="" /> : <div className="thumb" />}</td>
+                <tr key={p.id} className="click" onMouseEnter={() => warm(p.id)} onClick={() => router.push(`/projects/${p.id}`)}>
+                  <td style={{ width: 80 }}>{p.thumb ? <img className="thumb" src={p.thumb} alt="" loading="lazy" /> : <div className="thumb" />}</td>
                   <td><b>{p.name}</b><span className="badge">{p.number}</span><div className="muted small" style={{ fontStyle: 'italic' }}>{p.type}</div><div className="muted small">{p.address}</div></td>
                   <td>{p.designCount}</td>
                   <td>{fmtDate(p.createdAt)}</td>

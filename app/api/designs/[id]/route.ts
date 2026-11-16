@@ -1,12 +1,12 @@
-import { readDb, writeDb, findDesign, json, fail } from '@/lib/store';
+import { readDb, writeDb, findDesign, json, fail, thumbUrl, settingsOut } from '@/lib/store';
 import { removeViewLink } from '@/lib/shares';
 import { pictureFor } from '@/lib/catalog';
-import { solarAllowed } from '@/lib/auth';
+import { solarAllowed, guard } from '@/lib/auth';
 
 export const dynamic = 'force-dynamic';
 type Ctx = { params: Promise<{ id: string }> };
 
-export async function GET(_req: Request, ctx: Ctx) {
+export const GET = guard(async function GET(_req: Request, ctx: Ctx) {
   const { id } = await ctx.params;
   const db = (await readDb());
   const hit = findDesign(db, id);
@@ -14,11 +14,11 @@ export async function GET(_req: Request, ctx: Ctx) {
   // decided once (for logins that may use the aerial picture), so drawing the first shed does not change the picture
   if (!hit.project.imagery && (await solarAllowed())) { hit.project.imagery = pictureFor(hit.project); await writeDb(db); }
   const { designs, ...project } = hit.project;
-  return json({ design: hit.design, project, settings: { ...db.settings, googleMapsKey: '' } });
-}
+  return json({ design: { ...hit.design, thumb: thumbUrl(hit.design) }, project, settings: settingsOut(db.settings) });
+});
 
 // Saves the layout. Calculated results are kept; the screen shows them as out of date if the layout changed.
-export async function PUT(req: Request, ctx: Ctx) {
+export const PUT = guard(async function PUT(req: Request, ctx: Ctx) {
   const { id } = await ctx.params;
   const b = await req.json();
   const db = (await readDb());
@@ -35,13 +35,13 @@ export async function PUT(req: Request, ctx: Ctx) {
   if (typeof b.defaultModuleId === 'string') d.defaultModuleId = b.defaultModuleId;
   if (typeof b.structureName === 'string') d.structureName = b.structureName;
   if (['longrail', 'monorail', 'minirail', 'seam', 'reverse', 'reversep'].includes(b.defaultStructure)) d.defaultStructure = b.defaultStructure;
-  if (typeof b.thumb === 'string') d.thumb = b.thumb;
+  if (typeof b.thumb === 'string' && b.thumb.startsWith('data:image/') && b.thumb.length < 400000) d.thumb = b.thumb;
   d.updatedAt = new Date().toISOString();
   await writeDb(db);
   return json({ ok: true, updatedAt: d.updatedAt });
-}
+});
 
-export async function DELETE(_req: Request, ctx: Ctx) {
+export const DELETE = guard(async function DELETE(_req: Request, ctx: Ctx) {
   const { id } = await ctx.params;
   const db = (await readDb());
   const hit = findDesign(db, id);
@@ -50,4 +50,4 @@ export async function DELETE(_req: Request, ctx: Ctx) {
   await writeDb(db);
   await removeViewLink(id);
   return json({ ok: true, projectId: hit.project.id });
-}
+});

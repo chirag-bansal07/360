@@ -1,5 +1,6 @@
 'use client';
 import { useEffect, useState } from 'react';
+import { forgetAll } from '@/lib/client';
 
 export default function LoginPage() {
   const [mode, setMode] = useState<'login' | 'signup'>('login');
@@ -12,6 +13,7 @@ export default function LoginPage() {
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
+    forgetAll(); // lists kept from an earlier login are removed
     fetch('/api/auth/me').then((r) => r.json()).then((d) => setCanSignup(!!d.signupOpen)).catch(() => {});
   }, []);
 

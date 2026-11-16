@@ -2,6 +2,7 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useEffect, useState, type ReactNode } from 'react';
+import { apiKeep, forgetAll, stored } from '@/lib/client';
 
 const Icon = ({ d }: { d: string }) => (
   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d={d} /></svg>
@@ -12,6 +13,7 @@ type Company = { name: string; logo: string };
 let company: Company | null = null;
 type Me = { hosted: boolean; user: { email: string; name: string; role?: string } | null };
 let meKept: Me | null = null;
+let asked = false; // both are loaded again once per visit
 export function setCompany(c: Company) { company = c; if (typeof window !== 'undefined') window.dispatchEvent(new Event('company-changed')); }
 
 export default function Shell({ children }: { children: ReactNode }) {
@@ -21,11 +23,17 @@ export default function Shell({ children }: { children: ReactNode }) {
   useEffect(() => {
     const sync = () => setCo(company);
     window.addEventListener('company-changed', sync);
-    if (!company) fetch('/api/settings').then((r) => (r.ok ? r.json() : null)).then((d) => { if (d?.settings?.company) setCompany(d.settings.company); }).catch(() => {});
+    // what the last visit showed appears at once; the fresh answer replaces it when it arrives
+    if (!company) { const c = stored('/api/settings')?.settings?.company; if (c) setCompany(c); }
+    if (!meKept) { const m = stored<Me>('/api/auth/me'); if (m?.user || m?.hosted === false) { meKept = m; setMe(m); } }
+    if (!asked) {
+      asked = true;
+      apiKeep('/api/settings').then((d) => { if (d?.settings?.company) setCompany(d.settings.company); }).catch(() => {});
+      apiKeep<Me>('/api/auth/me').then((m) => { meKept = m; setMe(m); }).catch(() => {});
+    }
     return () => window.removeEventListener('company-changed', sync);
   }, []);
-  useEffect(() => { if (!meKept) fetch('/api/auth/me').then((r) => r.json()).then((m) => { meKept = m; setMe(m); }).catch(() => {}); }, []);
-  const signOut = async () => { await fetch('/api/auth/logout', { method: 'POST' }).catch(() => {}); window.location.href = '/login'; };
+  const signOut = async () => { await fetch('/api/auth/logout', { method: 'POST' }).catch(() => {}); forgetAll(); window.location.href = '/login'; };
   const on = (p: string) => (p === '/' ? path === '/' : path.startsWith(p));
   return (
     <div className="shell">

@@ -112,6 +112,7 @@ export default function Editor() {
   const past = useRef<Design[]>([]), future = useRef<Design[]>([]);
   const latest = useRef<Design | null>(null);
   const dirty = useRef(false), timer = useRef<any>(null), saving = useRef<Promise<void> | null>(null);
+  const thumbDue = useRef<boolean | null>(null); // the list picture is out of date (null: not edited yet, due only when there is none)
   latest.current = design;
 
   // ---------- saving ----------
@@ -119,13 +120,14 @@ export default function Editor() {
     clearTimeout(timer.current);
     if (saving.current) await saving.current;
     const d = latest.current;
-    if (!d || (!dirty.current && !withThumb)) return;
+    const picture = withThumb && (thumbDue.current ?? !d?.thumb); // a new picture only when the layout changed
+    if (!d || (!dirty.current && !picture)) return;
     dirty.current = false;
     setStatus('saving');
     const body: any = { name: d.name, sheds: d.sheds, keepouts: d.keepouts, blocks: d.blocks, obstructions: d.obstructions, walkways: d.walkways, inverter: d.inverter, defaultModuleId: d.defaultModuleId, structureName: d.structureName, defaultStructure: d.defaultStructure };
-    if (withThumb) { try { body.thumb = scene.current?.engine()?.snapshot({ size: 480, quality: 0.72 }); } catch { /* picture is optional */ } }
+    if (picture) { try { body.thumb = scene.current?.engine()?.snapshot({ size: 480, quality: 0.72 }); } catch { /* picture is optional */ } }
     saving.current = api(`/api/designs/${id}`, 'PUT', body)
-      .then(() => { if (!dirty.current) setStatus('saved'); })
+      .then(() => { if (picture && body.thumb) thumbDue.current = false; if (!dirty.current) setStatus('saved'); })
       .catch(() => { dirty.current = true; setStatus('error'); })
       .finally(() => { saving.current = null; });
     await saving.current;
@@ -137,14 +139,14 @@ export default function Editor() {
     if (record) { past.current.push(cur); if (past.current.length > 80) past.current.shift(); future.current = []; }
     latest.current = next;
     setDesign(next);
-    dirty.current = true; setStatus('unsaved');
+    dirty.current = true; thumbDue.current = true; setStatus('unsaved');
     clearTimeout(timer.current);
     timer.current = setTimeout(() => save(false), 800);
   }, [save, setDesign]);
 
   const undo = () => { const p = past.current.pop(); if (!p || !latest.current) return; future.current.push(latest.current); apply({ ...p, results: latest.current.results }, false); setSel(null); force((n) => n + 1); };
   const redo = () => { const f = future.current.pop(); if (!f || !latest.current) return; past.current.push(latest.current); apply({ ...f, results: latest.current.results }, false); setSel(null); force((n) => n + 1); };
-  const go = async (url: string) => { await save(true); if (dirty.current) return; router.push(url); };
+  const go = async (url: string) => { router.prefetch(url); await save(true); if (dirty.current) return; router.push(url); };
 
   useEffect(() => {
     const warn = (e: BeforeUnloadEvent) => { if (dirty.current) { e.preventDefault(); e.returnValue = ''; } };

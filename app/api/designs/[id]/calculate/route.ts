@@ -1,4 +1,5 @@
 import { readDb, writeDb, findDesign, json, fail } from '@/lib/store';
+import { guard } from '@/lib/auth';
 import { allModules } from '@/lib/catalog';
 import { designTotals } from '@/lib/geometry';
 import { simulate } from '@/lib/energy';
@@ -21,7 +22,7 @@ async function fetchWeather(lat: number, lng: number): Promise<Weather> {
   return { source: 'NASA POWER climatology', fetchedAt: new Date().toISOString(), ghi, dhi, temp: temp.map((t) => (isFinite(t) && t > -90 ? t : 25)) };
 }
 
-export async function POST(_req: Request, ctx: { params: Promise<{ id: string }> }) {
+export const POST = guard(async function POST(_req: Request, ctx: { params: Promise<{ id: string }> }) {
   const { id } = await ctx.params;
   const db = (await readDb());
   const hit = findDesign(db, id);
@@ -45,4 +46,4 @@ export async function POST(_req: Request, ctx: { params: Promise<{ id: string }>
   again.design.results = results;
   await writeDb(fresh);
   return json({ results });
-}
+});

@@ -13,6 +13,9 @@ type Props = {
 };
 export type SceneHandle = { engine: () => Engine | null };
 
+// The 3D code is a large download. It starts as soon as a screen that shows a scene opens, while the design is still loading.
+if (typeof window !== 'undefined') import('@/lib/engine').catch(() => {});
+
 // The ground the satellite picture has to cover: a square centred on the middle of everything drawn (x east, z south of
 // the site point), wide enough for the layout plus 40 m around it, never less than 160 m and never more than 340 m.
 // An empty design gets 200 m around the site point.

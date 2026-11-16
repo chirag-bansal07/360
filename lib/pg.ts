@@ -75,16 +75,25 @@ export async function setAppSetting(key: string, value: string): Promise<void> {
   appCache.delete(key);
 }
 
-// Session version of a user, remembered for a short time so pages and map tiles do not query on every request.
+// Session version of a user. It is remembered for five seconds, so the several checks made while one screen loads
+// (data, map tiles, pictures) cost one query. "fresh" always asks the database.
 const seen = new Map<string, { sv: number | null; at: number }>();
-export async function sessionVersion(userId: string, cached = false): Promise<number | null> {
+const asking = new Map<string, Promise<number | null>>();
+export async function sessionVersion(userId: string, fresh = false): Promise<number | null> {
   const hit = seen.get(userId);
-  if (cached && hit && Date.now() - hit.at < 10000) return hit.sv; // only map tiles use the short memory; everything else asks the database
-  await ensureSchema();
-  const rows = (await sql()`select sv from users where id = ${userId}`) as any[];
-  const sv = rows.length ? (rows[0].sv as number) : null;
-  if (seen.size > 5000) seen.clear();
-  seen.set(userId, { sv, at: Date.now() });
-  return sv;
+  if (!fresh && hit && Date.now() - hit.at < 5000) return hit.sv;
+  let p = asking.get(userId);
+  if (!p) {
+    p = (async () => {
+      await ensureSchema();
+      const rows = (await sql()`select sv from users where id = ${userId}`) as any[];
+      const sv = rows.length ? (rows[0].sv as number) : null;
+      if (seen.size > 5000) seen.clear();
+      seen.set(userId, { sv, at: Date.now() });
+      return sv;
+    })().finally(() => asking.delete(userId));
+    asking.set(userId, p);
+  }
+  return p;
 }
 export const forgetSession = (userId: string) => { seen.delete(userId); };

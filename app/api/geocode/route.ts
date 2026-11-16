@@ -1,11 +1,11 @@
 import { json, fail } from '@/lib/store';
 import { findPlace, remembered, GEO_UA } from '@/lib/geosearch';
-import { searchAllowed } from '@/lib/auth';
+import { searchAllowed, guard } from '@/lib/auth';
 
 export const dynamic = 'force-dynamic';
 
 // Place search and address lookup through OpenStreetMap Nominatim (free, light use only).
-export async function GET(req: Request) {
+export const GET = guard(async function GET(req: Request) {
   const u = new URL(req.url);
   const q = (u.searchParams.get('q') || '').trim(), lat = u.searchParams.get('lat'), lng = u.searchParams.get('lng');
   if (!(await searchAllowed())) return fail('Too many searches in a short time. Wait a few minutes and try again.', 429);
@@ -23,4 +23,4 @@ export async function GET(req: Request) {
   } catch {
     return fail('Place search is not reachable right now. You can still paste a Google Maps link or type the address by hand.', 502);
   }
-}
+});

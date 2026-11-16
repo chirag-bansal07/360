@@ -3,7 +3,7 @@ import { randomBytes, scrypt as scryptCb, timingSafeEqual } from 'crypto';
 import { promisify } from 'util';
 import { cookies } from 'next/headers';
 import { COOKIE, HOSTED, MAX_AGE, signSession, verifySession } from './session';
-import { allow, ensureSchema, forgetSession, sql } from './pg';
+import { allow, ensureSchema, forgetSession, sessionVersion, sql } from './pg';
 import { uid } from './catalog';
 
 const scrypt = promisify(scryptCb) as (pw: string, salt: Buffer, len: number) => Promise<Buffer>;
@@ -39,10 +39,16 @@ export async function endSession() {
 }
 
 // The signed-in user's id. Local mode has one built-in user.
-// The request guard (proxy.ts) has already checked the session version against the database.
+// The cookie must be signed and must carry the user's current session version (signing out raises it, which cancels
+// every cookie). This check runs here, in the server region next to the database, not in the request guard: the guard
+// runs near the visitor, and a database query from there added a trip across the world to every request.
 export async function currentUserId(): Promise<string | null> {
   if (!HOSTED) return 'local';
-  return verifySession((await cookies()).get(COOKIE)?.value)?.userId || null;
+  const s = verifySession((await cookies()).get(COOKIE)?.value);
+  if (!s) return null;
+  if ((await sessionVersion(s.userId)) === s.version) return s.userId;
+  // the remembered version may be a few seconds old (sign-out and sign-in again): only the database can say no
+  return (await sessionVersion(s.userId, true)) === s.version ? s.userId : null;
 }
 
 export class AuthError extends Error {}
@@ -50,6 +56,22 @@ export async function requireUserId(): Promise<string> {
   const id = await currentUserId();
   if (!id) throw new AuthError('Please sign in.');
   return id;
+}
+
+// Wraps every API handler that needs a sign-in. A request without a valid session gets 401 and loses its cookie,
+// so the sign-in page opens instead of the app.
+type Handler = (req: Request, ctx: any) => Promise<Response> | Response;
+export function guard<H extends Handler>(handler: H): H {
+  return (async (req: Request, ctx: any) => {
+    try {
+      await requireUserId();
+      return await handler(req, ctx);
+    } catch (e) {
+      if (!(e instanceof AuthError)) throw e;
+      try { (await cookies()).set(COOKIE, '', { httpOnly: true, secure: true, sameSite: 'lax', path: '/', maxAge: 0 }); } catch { /* the answer below is enough */ }
+      return Response.json({ error: 'Please sign in.' }, { status: 401 });
+    }
+  }) as H;
 }
 
 // Every new account needs the sign-up code (SIGNUP_CODE, at least 12 characters). Without one, sign-up is closed.

@@ -7,6 +7,7 @@ import type { Design, ModuleSpec, Pt, Results } from './types';
 import { findModule } from './catalog';
 import { shedRoofY, shedUnder, shedNormal, blockSlots, blockYaw, designBounds, polyCentre, pointInPoly, rad, PANEL_THICK } from './geometry';
 import { tileXY, metresPerPixel } from './mercator';
+import { imageryInfo, forgetImagery } from './imageryInfo';
 
 export type Selection = { kind: 'block' | 'obstruction' | 'walkway' | 'shed' | 'keepout'; id: string } | null;
 export type DrawKind = 'shed' | 'keepout';
@@ -231,7 +232,7 @@ export class Engine {
     let zoom = 18, provider = 'esri', overlay: { sizeE: number; sizeN: number; dx: number; dz: number; rot: number; dark?: boolean } | null = null;
     this.picChoice = this.opts.picture;
     try {
-      const info = await (await fetch(`${base}/imagery?lat=${lat}&lng=${lng}`)).json();
+      const info = await imageryInfo(base, lat, lng);
       zoom = info.zoom || 18; provider = info.provider || 'esri'; overlay = info.overlay || null;
       this.credit = info.credit || this.credit;
       if (overlay && overlay.sizeE > 0) {
@@ -268,11 +269,15 @@ export class Engine {
     (this.ground.material as THREE.MeshLambertMaterial).dispose();
     this.ground.material = new THREE.MeshLambertMaterial({ map: tex });
     const jobs: Promise<void>[] = [];
+    // The ground picture is large. It is sent to the graphics card at most three times a second while tiles arrive,
+    // not once for every tile, so the screen stays smooth during loading.
+    let due: any = 0, failed = 0;
+    const show = () => { due = 0; if (this.disposed) return; tex.needsUpdate = true; this.dirty = true; };
     for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) {
       jobs.push(new Promise((resolve) => {
         const img = new Image();
-        img.onload = () => { sg.drawImage(img, i * 256, j * 256, 256, 256); g.drawImage(img, i * 256 * up, j * 256 * up, 256 * up, 256 * up); tex.needsUpdate = true; this.dirty = true; resolve(); };
-        img.onerror = () => resolve();
+        img.onload = () => { sg.drawImage(img, i * 256, j * 256, 256, 256); g.drawImage(img, i * 256 * up, j * 256 * up, 256 * up, 256 * up); if (!due) due = setTimeout(show, 330); resolve(); };
+        img.onerror = () => { failed++; resolve(); };
         img.src = `${base}/tile/${zoom}/${x0 + i}/${y0 + j}${provider === 'google' ? '?p=google' : ''}`;
       }));
     }
@@ -298,6 +303,8 @@ export class Engine {
       }));
     }
     await Promise.all(jobs);
+    clearTimeout(due);
+    if (failed > (n * n) / 2) forgetImagery(base, lat, lng); // the remembered source no longer answers: ask again next time
     if (this.disposed) return;
     try {
       sharpen(sg, src.width, src.height, 0.4);

@@ -1,5 +1,5 @@
-import { solarAllowed } from '@/lib/auth';
-import { readDb, writeDb, json, fail } from '@/lib/store';
+import { solarAllowed, guard } from '@/lib/auth';
+import { readDb, writeDb, json, fail, thumbUrl } from '@/lib/store';
 import { uid, newDesign } from '@/lib/catalog';
 import { guessUtcOffset } from '@/lib/sun';
 import type { Project, Shed } from '@/lib/types';
@@ -8,17 +8,17 @@ const num = (v: any, min: number, max: number, dflt: number) => { const n = Numb
 
 export const dynamic = 'force-dynamic';
 
-export async function GET() {
+export const GET = guard(async function GET() {
   const db = (await readDb());
   const projects = [...db.projects].reverse().map((p) => ({
     id: p.id, number: p.number, name: p.name, clientName: p.clientName, type: p.type,
     address: p.displayAddress || p.address, lat: p.lat, lng: p.lng, createdAt: p.createdAt,
-    designCount: p.designs.length, thumb: p.designs.find((d) => d.thumb)?.thumb || '',
+    designCount: p.designs.length, thumb: thumbUrl(p.designs.find((d) => d.thumb) || { id: '' }),
   }));
   return json({ projects });
-}
+});
 
-export async function POST(req: Request) {
+export const POST = guard(async function POST(req: Request) {
   const b = await req.json();
   const noMap = b.noMap === true;
   let lat = Number(b.lat), lng = Number(b.lng);
@@ -59,4 +59,4 @@ export async function POST(req: Request) {
   db.projects.push(project);
   await writeDb(db);
   return json({ project });
-}
+});

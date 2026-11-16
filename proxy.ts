@@ -1,11 +1,12 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { COOKIE, HOSTED, verifySession } from '@/lib/session';
-import { sessionVersion } from '@/lib/pg';
 
 // Guards every page and the data API.
 //  - On this computer: requests must be addressed to a local host name (stops DNS-rebinding from other sites).
-//  - Hosted: every page and API call needs a valid sign-in, except the sign-in page and its API,
+//  - Hosted: every page and API call needs a signed login cookie, except the sign-in page and its API,
 //    and shared links (/view, /report and /api/share), which are opened by people without an account.
+//    This guard runs near the visitor and does not use the database. Whether the cookie is still the user's current
+//    session is checked by every API handler (guard() in lib/auth.ts). Pages themselves hold no data.
 //  - Always: changes (POST / PUT / DELETE) must come from the app's own pages (stops other sites from changing data).
 // Extra local host names can be allowed with SUNCRAFT_HOSTS="name1,name2".
 const LOCAL = ['localhost', '127.0.0.1', '[::1]'];
@@ -37,9 +38,7 @@ export async function proxy(req: NextRequest) {
     const open = pathname === '/login' || pathname.startsWith('/api/auth/');
     let signedIn = false;
     try {
-      const s = verifySession(req.cookies.get(COOKIE)?.value);
-      // the cookie must also carry the user's current session version (signing out raises it)
-      if (s) signedIn = (await sessionVersion(s.userId, pathname.startsWith('/api/tile/'))) === s.version;
+      signedIn = !!verifySession(req.cookies.get(COOKIE)?.value);
     } catch {
       return deny('The server is not ready (session check failed). Try again shortly.', 503);
     }
